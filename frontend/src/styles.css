@@ -21,6 +21,11 @@ input {
   font: inherit;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -136,6 +141,10 @@ p {
   color: #ffffff;
 }
 
+.secondary-action.spaced {
+  margin-top: 16px;
+}
+
 .ghost-action {
   background: #edf3fb;
   color: #24507c;
@@ -191,6 +200,10 @@ p {
   gap: 16px;
 }
 
+.content-grid.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .content-grid.lower {
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr) minmax(280px, 0.75fr);
 }
@@ -226,6 +239,18 @@ p {
   min-height: 46px;
   border-top: 1px solid #edf1f6;
   color: #405166;
+}
+
+.table-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-button:hover {
+  background: #f7fbff;
 }
 
 .table-row strong {
@@ -278,6 +303,29 @@ p {
   background: #f8fbff;
 }
 
+.notice {
+  min-height: 42px;
+  border-radius: 6px;
+  border: 1px solid #d8e2ee;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: #405166;
+}
+
+.notice.success {
+  color: #087443;
+  border-color: #a7e7c4;
+  background: #effbf5;
+}
+
+.notice.danger {
+  color: #9d1c1c;
+  border-color: #ffc7c7;
+  background: #fff1f1;
+}
+
 .step-list {
   margin: 0;
   padding-left: 22px;
@@ -321,6 +369,19 @@ p {
 .resource {
   display: grid;
   gap: 7px;
+}
+
+.timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.timeline span {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  border-top: 1px solid #edf1f6;
+  color: #405166;
 }
 
 .resource div {
