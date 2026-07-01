@@ -1,26 +1,26 @@
-# Deployment Guide
+# 部署说明
 
-This project is designed for single-container Docker deployment in the MVP phase.
+本项目在 MVP 阶段按单容器 Docker 部署设计。
 
-## Production Checklist
+## 生产环境检查项
 
-Before exposing the panel beyond a local network:
+在把面板暴露到内网之外之前，请先完成这些检查：
 
-- Set a strong `APP_SECRET`.
-- Set a strong `CREDENTIAL_SECRET` and keep it stable. Losing it will prevent decrypting saved credentials once encryption-backed settings are implemented.
-- Put the service behind HTTPS if accessed remotely.
-- Restrict access with a firewall or reverse proxy authentication until built-in auth is complete.
-- Back up the Docker data volume.
+- 设置强随机 `APP_SECRET`。
+- 设置强随机 `CREDENTIAL_SECRET`，并保持稳定。后续实现加密存储后，如果丢失该密钥，将无法解密已保存的凭据。
+- 如果需要远程访问，请放在 HTTPS 后面。
+- 在内置登录能力完整前，建议通过防火墙或反向代理认证限制访问。
+- 定期备份 Docker 数据卷。
 
 ## Docker Compose
 
-Create `.env`:
+创建 `.env`：
 
 ```powershell
 copy .env.example .env
 ```
 
-Edit `.env`:
+编辑 `.env`：
 
 ```text
 APP_SECRET=replace-with-random-secret
@@ -30,57 +30,57 @@ AI_API_KEY=your-key
 AI_MODEL=deepseek-chat
 ```
 
-Start:
+启动服务：
 
 ```powershell
 docker compose up -d --build
 ```
 
-View logs:
+查看日志：
 
 ```powershell
 docker compose logs -f ai-agent-ssh
 ```
 
-Stop:
+停止服务：
 
 ```powershell
 docker compose down
 ```
 
-Remove data volumes only when you intentionally want to delete local state:
+只有在确认要删除本地状态时，才删除数据卷：
 
 ```powershell
 docker compose down -v
 ```
 
-## Ports And Volumes
+## 端口和数据卷
 
-The compose file maps:
+Compose 文件的端口映射：
 
 ```text
-host 8088 -> container 8080
+宿主机 8088 -> 容器 8080
 ```
 
-Volumes:
+数据卷：
 
 ```text
 ai_agent_ssh_data    -> /app/data
 ai_agent_ssh_uploads -> /app/uploads
 ```
 
-## API Smoke Test
+## API 冒烟测试
 
 ```powershell
 curl http://localhost:8088/api/health
 ```
 
-Expected response:
+预期响应：
 
 ```json
 {"status":"ok","service":"ai-agent-ssh"}
 ```
 
-## Current MVP Limitations
+## 当前 MVP 限制
 
-This scaffold validates the selected project framework and delivery shape. It does not yet perform real SSH operations. Treat the UI terminal and deployment sections as placeholders until the SSH executor, WebSocket terminal, task engine, and AI gateway are implemented.
+当前工程用于验证项目框架和交付方式，还不会执行真实 SSH 操作。界面里的终端和部署区域目前是占位能力，后续需要继续实现 SSH 执行器、WebSocket 终端、任务引擎和 AI 网关。

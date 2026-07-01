@@ -1,90 +1,90 @@
-# AI Ops Panel Scaffold Implementation Plan
+# AI 运维面板基础工程实施计划
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **给 Claude 的要求：** 按任务逐步执行，不要跳过验证步骤。
 
-**Goal:** Build a runnable MVP foundation for an AI-assisted SSH operations panel.
+**目标：** 构建一个可运行的 AI SSH 运维面板 MVP 基础工程。
 
-**Architecture:** Use a React/Vite frontend served separately in development and built into static assets for Docker. Use a FastAPI backend for auth, settings, server records, deployment plan validation, command safety checks, and future SSH/WebSocket orchestration. Keep the first version single-container friendly with SQLite storage and a clean upgrade path to PostgreSQL and a background queue.
+**架构：** 开发阶段前端和后端分别运行；Docker 构建阶段把 React/Vite 前端编译成静态资源，并由 FastAPI 后端统一托管。后端负责登录、配置、服务器记录、部署计划校验、命令安全检查，并为后续 SSH/WebSocket 编排预留结构。第一版保持单容器友好，使用 SQLite 存储，并保留迁移到 PostgreSQL 和后台任务队列的空间。
 
-**Tech Stack:** React, Vite, TypeScript, FastAPI, Pydantic, SQLAlchemy, SQLite, pytest, Docker Compose.
+**技术栈：** React、Vite、TypeScript、FastAPI、Pydantic、SQLAlchemy、SQLite、pytest、Docker Compose。
 
 ---
 
-### Task 1: Backend Safety Domain
+### 任务 1：后端命令安全领域
 
-**Files:**
-- Create: `backend/app/core/security.py`
-- Create: `backend/tests/test_command_safety.py`
+**文件：**
+- 创建：`backend/app/core/security.py`
+- 创建：`backend/tests/test_command_safety.py`
 
-**Steps:**
-1. Write pytest coverage for dangerous command detection.
-2. Run `python -m pytest backend/tests/test_command_safety.py -v` and confirm it fails because the module is missing.
-3. Implement `is_dangerous_command`.
-4. Re-run the test and confirm it passes.
+**步骤：**
+1. 为危险命令检测编写 pytest 测试。
+2. 运行 `python -m pytest backend/tests/test_command_safety.py -v`，确认因为模块缺失而失败。
+3. 实现 `is_dangerous_command` 和命令安全检查结果。
+4. 重新运行测试，确认通过。
 
-### Task 2: Deployment Plan Validation
+### 任务 2：部署计划校验
 
-**Files:**
-- Create: `backend/app/schemas/deployment.py`
-- Create: `backend/tests/test_deployment_plan.py`
+**文件：**
+- 创建：`backend/app/schemas/deployment.py`
+- 创建：`backend/tests/test_deployment_plan.py`
 
-**Steps:**
-1. Write pytest coverage for accepted deployment plans and rejected dangerous steps.
-2. Run the targeted tests and confirm failure.
-3. Implement Pydantic models and validation.
-4. Re-run targeted tests and full backend tests.
+**步骤：**
+1. 为合法部署计划和危险步骤拦截编写 pytest 测试。
+2. 运行目标测试，确认失败。
+3. 实现 Pydantic 模型和校验逻辑。
+4. 重新运行目标测试和完整后端测试。
 
-### Task 3: FastAPI App Shell
+### 任务 3：FastAPI 应用骨架
 
-**Files:**
-- Create: `backend/app/main.py`
-- Create: `backend/app/api/routes.py`
-- Create: `backend/app/core/config.py`
-- Create: `backend/tests/test_api.py`
+**文件：**
+- 创建：`backend/app/main.py`
+- 创建：`backend/app/api/routes.py`
+- 创建：`backend/app/core/config.py`
+- 创建：`backend/tests/test_api.py`
 
-**Steps:**
-1. Write API tests for `/api/health`, `/api/commands/check`, and `/api/deployments/validate-plan`.
-2. Run the tests and confirm failure.
-3. Implement the routes.
-4. Re-run API tests.
+**步骤：**
+1. 为 `/api/health`、`/api/commands/check`、`/api/deployments/validate-plan` 编写 API 测试。
+2. 运行测试，确认失败。
+3. 实现路由。
+4. 重新运行 API 测试。
 
-### Task 4: Persistence Foundation
+### 任务 4：持久化基础
 
-**Files:**
-- Create: `backend/app/db/session.py`
-- Create: `backend/app/db/models.py`
-- Create: `backend/app/db/init_db.py`
+**文件：**
+- 创建：`backend/app/db/session.py`
+- 创建：`backend/app/db/models.py`
+- 创建：`backend/app/db/init_db.py`
 
-**Steps:**
-1. Add SQLAlchemy models for users, servers, AI providers, and audit logs.
-2. Initialize SQLite tables on startup.
-3. Keep API endpoints minimal and avoid implementing real SSH execution in this scaffold.
+**步骤：**
+1. 添加用户、服务器、AI 中转站和审计日志的 SQLAlchemy 模型。
+2. 应用启动时初始化 SQLite 表。
+3. 保持 API 端点简洁，本阶段不实现真实 SSH 执行。
 
-### Task 5: Frontend Shell
+### 任务 5：前端界面骨架
 
-**Files:**
-- Create: `frontend/package.json`
-- Create: `frontend/src/App.tsx`
-- Create: `frontend/src/main.tsx`
-- Create: `frontend/src/styles.css`
+**文件：**
+- 创建：`frontend/package.json`
+- 创建：`frontend/src/App.tsx`
+- 创建：`frontend/src/main.tsx`
+- 创建：`frontend/src/styles.css`
 
-**Steps:**
-1. Create a TypeScript Vite app shell.
-2. Add dashboard sections for servers, AI settings, deployment workflow, terminal placeholder, and audit history.
-3. Add commands for type checking and build.
+**步骤：**
+1. 创建 TypeScript Vite 应用骨架。
+2. 添加服务器列表、AI 设置、部署流程、终端占位和历史记录等面板区域。
+3. 添加类型检查和构建命令。
 
-### Task 6: Docker And Documentation
+### 任务 6：Docker 和文档
 
-**Files:**
-- Create: `Dockerfile`
-- Create: `docker-compose.yml`
-- Create: `.dockerignore`
-- Create: `README.md`
-- Create: `docs/deployment.md`
+**文件：**
+- 创建：`Dockerfile`
+- 创建：`docker-compose.yml`
+- 创建：`.dockerignore`
+- 创建：`README.md`
+- 创建：`docs/deployment.md`
 
-**Steps:**
-1. Build frontend assets in Docker.
-2. Install backend dependencies and serve FastAPI on port 8080.
-3. Document local development, Docker Compose deployment, environment variables, and first-run notes.
-4. Run backend tests, frontend build, and Docker config validation.
-5. Commit the scaffold.
+**步骤：**
+1. 在 Docker 构建阶段编译前端资源。
+2. 安装后端依赖，并在 8080 端口运行 FastAPI。
+3. 文档说明本地开发、Docker Compose 部署、环境变量和首次启动注意事项。
+4. 运行后端测试、前端构建和 Docker 配置验证。
+5. 提交基础工程。

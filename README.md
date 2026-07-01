@@ -1,34 +1,34 @@
 # AI Agent SSH
 
-AI Agent SSH is the foundation for a lightweight AI-assisted SSH operations panel. The first scaffold uses a React/Vite frontend and a FastAPI backend packaged into a single Docker service.
+AI Agent SSH 是一个轻量级 AI SSH 运维面板的基础工程。当前版本采用 React/Vite 前端和 FastAPI 后端，并支持打包成单个 Docker 服务。
 
-Current scope:
+当前已包含：
 
-- FastAPI app shell with health check.
-- Dangerous command detection.
-- Deployment plan validation before execution.
-- SQLite persistence foundation for users, servers, AI providers, models, and audit logs.
-- React operations dashboard scaffold.
-- Docker Compose deployment.
+- FastAPI 应用骨架和健康检查接口。
+- 危险命令检测。
+- 部署计划执行前校验。
+- SQLite 持久化基础，包含用户、服务器、AI 中转站、模型和审计日志表结构。
+- React 运维面板界面骨架。
+- Docker Compose 部署配置。
 
-Not implemented yet:
+当前尚未实现：
 
-- Real SSH connection testing and command execution.
-- Web SSH terminal proxy.
-- AI provider CRUD and model fetching.
-- Package upload and real deployment execution.
-- Authentication UI and session handling.
+- 真实 SSH 连接测试和命令执行。
+- Web SSH 终端代理。
+- AI 中转站增删改查和模型拉取。
+- 服务包上传和真实部署执行。
+- 登录界面和会话管理。
 
-## Tech Stack
+## 技术栈
 
-- Frontend: React, Vite, TypeScript, lucide-react, @xterm/xterm-ready dependency.
-- Backend: FastAPI, Pydantic, SQLAlchemy, SQLite.
-- Future backend integrations: AsyncSSH, OpenAI-compatible AI gateway, Redis-backed task queue.
-- Deployment: Docker and Docker Compose.
+- 前端：React、Vite、TypeScript、lucide-react、@xterm/xterm。
+- 后端：FastAPI、Pydantic、SQLAlchemy、SQLite。
+- 后续后端集成：AsyncSSH、OpenAI-compatible AI 网关、Redis 任务队列。
+- 部署：Docker、Docker Compose。
 
-## Local Development
+## 本地开发
 
-Backend:
+后端：
 
 ```powershell
 cd backend
@@ -38,7 +38,7 @@ python -m venv .venv
 .\.venv\Scripts\uvicorn.exe app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-Frontend:
+前端：
 
 ```powershell
 cd frontend
@@ -46,60 +46,60 @@ npm install
 npm run dev
 ```
 
-The frontend dev server proxies `/api` requests to `http://127.0.0.1:8080`.
+前端开发服务会把 `/api` 请求代理到 `http://127.0.0.1:8080`。
 
-## Docker Deployment
+## Docker 部署
 
 ```powershell
 copy .env.example .env
 docker compose up -d --build
 ```
 
-Open:
+访问地址：
 
 ```text
 http://localhost:8088
 ```
 
-Health check:
+健康检查：
 
 ```powershell
 curl http://localhost:8088/api/health
 ```
 
-## Environment Variables
+## 环境变量
 
-| Name | Required | Description |
+| 名称 | 必填 | 说明 |
 | --- | --- | --- |
-| `APP_SECRET` | yes | Application secret used for future session signing. Change in production. |
-| `CREDENTIAL_SECRET` | yes | Secret for encrypting SSH credentials and AI API keys. Change in production. |
-| `DATABASE_URL` | no | Defaults to SQLite at `/app/data/ai_agent_ssh.db` in Docker. |
-| `AI_BASE_URL` | no | Initial OpenAI-compatible base URL. Use a `/v1` URL, not `/chat/completions`. |
-| `AI_API_KEY` | no | Initial AI API key. |
-| `AI_MODEL` | no | Initial default model name. |
+| `APP_SECRET` | 是 | 应用密钥，后续用于会话签名。生产环境必须修改。 |
+| `CREDENTIAL_SECRET` | 是 | SSH 凭据和 AI API Key 的加密密钥。生产环境必须修改。 |
+| `DATABASE_URL` | 否 | Docker 中默认使用 `/app/data/ai_agent_ssh.db` 作为 SQLite 数据库。 |
+| `AI_BASE_URL` | 否 | 首次初始化使用的 OpenAI-compatible Base URL。填写到 `/v1`，不要填写 `/chat/completions`。 |
+| `AI_API_KEY` | 否 | 首次初始化使用的 AI API Key。 |
+| `AI_MODEL` | 否 | 首次初始化使用的默认模型。 |
 
-## Repository Layout
+## 仓库结构
 
 ```text
 backend/
   app/
-    api/          FastAPI routes
-    core/         config and command safety logic
-    db/           SQLAlchemy models and session setup
-    schemas/      Pydantic request and domain schemas
-  tests/          pytest coverage
+    api/          FastAPI 路由
+    core/         配置和命令安全逻辑
+    db/           SQLAlchemy 模型和会话配置
+    schemas/      Pydantic 请求和领域模型
+  tests/          pytest 测试
 frontend/
-  src/            React app shell
+  src/            React 应用界面
 docs/
-  deployment.md   deployment notes
-  plans/          implementation plans
+  deployment.md   部署说明
+  plans/          实施计划
 ```
 
-## Roadmap
+## 后续路线
 
-1. Add single-admin authentication and first-run setup.
-2. Add AI provider settings CRUD and encrypted API key storage.
-3. Add server CRUD and SSH connection testing with AsyncSSH.
-4. Add WebSocket SSH terminal using @xterm/xterm.
-5. Add package upload, project analyzer, and AI deployment planning.
-6. Add deployment task engine, logs, cancellation, and rollback records.
+1. 增加单管理员登录和首次初始化。
+2. 增加 AI 中转站配置管理，并加密保存 API Key。
+3. 增加服务器管理和基于 AsyncSSH 的连接测试。
+4. 增加基于 @xterm/xterm 的 WebSocket SSH 终端。
+5. 增加服务包上传、项目分析器和 AI 部署计划生成。
+6. 增加部署任务引擎、日志、取消任务和回滚记录。
