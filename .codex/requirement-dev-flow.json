@@ -1,0 +1,24 @@
+{
+  "enabled": true,
+  "language": "zh-CN",
+  "mode": "local-docs-first",
+  "multica": {
+    "syncEnabled": false,
+    "autoDispatchEnabled": false,
+    "reason": "项目尚未绑定 Multica workspaceId 和 projectId。"
+  },
+  "docRoots": {
+    "context": "docs/项目上下文",
+    "collaboration": "docs/智能体协作",
+    "templates": "docs/需求模板",
+    "requirements": "docs/需求"
+  },
+  "qualityGates": [
+    "先产出需求和架构文档，再拆计划",
+    "实现代码前先写测试",
+    "后端运行 pytest",
+    "前端运行 npm test 和 npm run build",
+    "规格审查通过后再做代码质量审查",
+    "交付前更新项目上下文和遗留事项"
+  ]
+}

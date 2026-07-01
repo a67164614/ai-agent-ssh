@@ -1,0 +1,17 @@
+{
+  "projectName": "AI Agent SSH",
+  "localPath": "E:\\工作数据\\ai-agents\\ai-agent-ssh",
+  "multica": {
+    "bound": false,
+    "server": "",
+    "workspaceId": "",
+    "projectId": "",
+    "projectUrl": "",
+    "issueUrlTemplate": ""
+  },
+  "notification": {
+    "barkUrlTemplate": "",
+    "messagePrefix": "曹总，"
+  },
+  "notes": "当前仅完成本地需求研发流程初始化；Multica workspaceId/projectId 待补充。"
+}
