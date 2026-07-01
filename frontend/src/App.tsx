@@ -182,6 +182,10 @@ export function App() {
   }
 
   async function submitAuth(mode: "init" | "login") {
+    if (authForm.password.length < 8) {
+      setNotice({ tone: "danger", message: "认证失败：密码至少需要 8 位。" });
+      return;
+    }
     setIsLoading(true);
     setNotice({ tone: "neutral", message: mode === "init" ? "正在初始化管理员..." : "正在登录..." });
     try {
@@ -837,9 +841,29 @@ async function apiRequest<T>(
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
   });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw new Error(await readErrorMessage(response));
   }
   return (await response.json()) as T;
+}
+
+async function readErrorMessage(response: Response) {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") {
+      return body.detail;
+    }
+    if (Array.isArray(body.detail) && body.detail.length > 0) {
+      const first = body.detail[0] as { msg?: string; loc?: string[] };
+      const field = Array.isArray(first.loc) ? first.loc[first.loc.length - 1] : "";
+      if (field === "password" && first.msg?.includes("8")) {
+        return "密码至少需要 8 位。";
+      }
+      return first.msg ?? `HTTP ${response.status}`;
+    }
+  } catch {
+    return `HTTP ${response.status}`;
+  }
+  return `HTTP ${response.status}`;
 }
 
 function formatError(error: unknown) {

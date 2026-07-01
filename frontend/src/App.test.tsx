@@ -12,6 +12,22 @@ beforeEach(() => {
 });
 
 describe("App interactions", () => {
+  test("shows a clear validation message for short admin password", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ detail: "Not authenticated" })
+    });
+
+    render(<App />);
+    await userEvent.type(screen.getByLabelText("账号"), "admin");
+    await userEvent.type(screen.getByLabelText("密码"), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "初始化管理员" }));
+
+    expect(screen.getByText("认证失败：密码至少需要 8 位。")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("initializes an admin and loads protected resources", async () => {
     fetchMock
       .mockResolvedValueOnce({
