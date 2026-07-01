@@ -17,19 +17,26 @@ AI Agent SSH 是一个轻量 AI SSH 运维面板。目标是通过 Web 面板管
 - 已有命令安全检查接口：`POST /api/commands/check`。
 - 已有部署计划校验接口：`POST /api/deployments/validate-plan`。
 - 已有健康检查接口：`GET /api/health`。
-- 已有 React 运维面板，并支持菜单切换、后端检查、命令检查和部署计划校验。
+- 已有管理员初始化/登录接口：`POST /api/auth/init`、`POST /api/auth/login`、`GET /api/auth/me`。
+- 已有 AI 中转站接口：`/api/ai-providers` 和模型管理子接口。
+- 已有服务器管理接口：`/api/servers`、连接测试占位和快照占位。
+- 已有 React 运维面板，并支持登录、菜单切换、服务器新增、AI 中转站新增、后端检查、命令检查和部署计划校验。
 - 已有 Docker 单容器部署配置。
+- 已将总 PRD 纳入仓库根目录：`ai-ops-panel-prd.md`。
+- 已完成 Milestone 1 本地需求拆解：`docs/需求/Milestone-1-基础面板/`。
 
 ## 尚未实现
 
-- 登录和初始化管理员账号。
-- AI 中转站 CRUD、模型拉取和加密保存 API Key。
-- 服务器 CRUD 和真实 SSH 连接测试。
+- 真实 AI 连接测试和模型拉取。
+- 真实 SSH 连接测试和只读资源快照采集。
 - WebSocket SSH 终端。
 - 服务包上传、项目分析、AI 部署计划生成。
 - 部署任务引擎、日志、取消和回滚。
+- 前端服务器编辑/删除、详情页、快照刷新和模型完整管理。
 
 ## 注意事项
 
 - `docker-compose.yml` 可能有用户本地端口改动，不能擅自覆盖。
 - 当前 Multica 绑定未完成，需求流程先使用本地文档模式。
+- 用户已明确要求不用管 Multica，只关注多子智能体流程交互和完整落地开发。
+- 第一阶段已完成基础管理闭环；真实 SSH executor 和真实 AI HTTP 调用仍是下一阶段重点。

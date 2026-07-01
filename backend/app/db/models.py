@@ -42,7 +42,26 @@ class Server(TimestampMixin, Base):
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="unknown")
     connection_mode: Mapped[str] = mapped_column(String(30), default="ssh")
+    last_test_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    snapshots: Mapped[list["ServerSnapshot"]] = relationship(back_populates="server", cascade="all, delete-orphan")
+
+
+class ServerSnapshot(Base):
+    __tablename__ = "server_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(30), default="skipped")
+    cpu_usage: Mapped[float | None] = mapped_column(nullable=True)
+    memory_usage: Mapped[float | None] = mapped_column(nullable=True)
+    disk_usage: Mapped[float | None] = mapped_column(nullable=True)
+    os_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    server: Mapped[Server] = relationship(back_populates="snapshots")
 
 
 class AiProvider(TimestampMixin, Base):
@@ -56,6 +75,9 @@ class AiProvider(TimestampMixin, Base):
     default_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
     api_mode: Mapped[str] = mapped_column(String(50), default="chat_completions")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_test_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    last_test_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     models: Mapped[list["AiModel"]] = relationship(back_populates="provider", cascade="all, delete-orphan")
 

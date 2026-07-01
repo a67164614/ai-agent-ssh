@@ -17,10 +17,10 @@ WORKDIR /app
 
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 COPY backend/app /app/backend/app
-COPY --from=frontend-build /app/backend/static /app/backend/static
 
 WORKDIR /app/backend
 RUN pip install --no-cache-dir .
+COPY --from=frontend-build /app/backend/static /app/backend/static
 
 EXPOSE 8080
 
