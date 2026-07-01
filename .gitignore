@@ -1,0 +1,23 @@
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+data/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Build outputs
+backend/static/

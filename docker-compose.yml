@@ -1,0 +1,22 @@
+services:
+  ai-agent-ssh:
+    build:
+      context: .
+    image: ai-agent-ssh:local
+    ports:
+      - "8088:8080"
+    volumes:
+      - ai_agent_ssh_data:/app/data
+      - ai_agent_ssh_uploads:/app/uploads
+    environment:
+      APP_SECRET: ${APP_SECRET:-change-me}
+      CREDENTIAL_SECRET: ${CREDENTIAL_SECRET:-change-me}
+      DATABASE_URL: sqlite:////app/data/ai_agent_ssh.db
+      AI_BASE_URL: ${AI_BASE_URL:-https://cdn.coderelay.cn/v1}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-deepseek-chat}
+    restart: unless-stopped
+
+volumes:
+  ai_agent_ssh_data:
+  ai_agent_ssh_uploads:
