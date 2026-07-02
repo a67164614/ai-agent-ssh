@@ -368,6 +368,12 @@ p {
   color: #17202a;
 }
 
+.table-row .row-message {
+  grid-column: 1 / -1;
+  color: #607086;
+  line-height: 1.4;
+}
+
 .table-head {
   min-height: 34px;
   border-top: 0;
@@ -390,6 +396,17 @@ p {
 .status.unknown {
   color: #816400;
   background: #fff5ce;
+}
+
+.status.offline {
+  color: #9d1c1c;
+  background: #fff1f1;
+}
+
+.status.unchecked,
+.status.skipped {
+  color: #607086;
+  background: #edf3fb;
 }
 
 .settings-list {

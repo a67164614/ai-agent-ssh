@@ -23,10 +23,11 @@ const serverRecord = {
   username: "root",
   auth_type: "password",
   remark: null,
-  status: "unknown",
+  status: "offline",
   connection_mode: "ssh",
   has_password: true,
-  has_private_key: false
+  has_private_key: false,
+  last_test_message: "SSH 连接失败：认证失败。"
 };
 
 const providerRecord = {
@@ -46,7 +47,7 @@ function mockApi(routes: MockApiRoutes = {}) {
     const path = input.toString();
     const route = routes[path] ?? {
       "/api/auth/status": { body: { initialized: false } },
-      "/api/auth/me": { body: { detail: "Not authenticated" }, ok: false, status: 401 },
+      "/api/auth/me": { body: { detail: "请先登录。" }, ok: false, status: 401 },
       "/api/servers": { body: [] },
       "/api/ai-providers": { body: [] }
     }[path];
@@ -165,6 +166,34 @@ describe("App interactions", () => {
     );
   });
 
+  test("shows Chinese server status and connection test result", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": { body: [serverRecord] },
+      "/api/servers/1/test": {
+        body: {
+          ...serverRecord,
+          status: "online",
+          last_test_message: "SSH 连接成功。"
+        }
+      }
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("离线")).toBeInTheDocument();
+    expect(screen.getByText("SSH 连接失败：认证失败。")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "测试" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("服务器连接成功：SSH 连接成功。")).toBeInTheDocument();
+    });
+    expect(screen.getByText("在线")).toBeInTheDocument();
+  });
+
   test("creates an AI provider through the API", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
     mockApi({
@@ -177,9 +206,9 @@ describe("App interactions", () => {
     await userEvent.click(await screen.findByRole("button", { name: /系统设置/ }));
     await userEvent.clear(screen.getByLabelText("供应商名称"));
     await userEvent.type(screen.getByLabelText("供应商名称"), "Relay");
-    await userEvent.clear(screen.getByLabelText("Base URL"));
-    await userEvent.type(screen.getByLabelText("Base URL"), "https://relay.example/v1");
-    await userEvent.type(screen.getByLabelText("API Key"), "sk-test");
+    await userEvent.clear(screen.getByLabelText("接口基础地址"));
+    await userEvent.type(screen.getByLabelText("接口基础地址"), "https://relay.example/v1");
+    await userEvent.type(screen.getByLabelText("API 密钥"), "sk-test");
     await userEvent.clear(screen.getByLabelText("默认模型"));
     await userEvent.type(screen.getByLabelText("默认模型"), "deepseek-chat");
     await userEvent.click(screen.getByRole("button", { name: "保存 AI 中转站" }));
@@ -201,7 +230,7 @@ describe("App interactions", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
 
-    expect(screen.getByRole("heading", { name: "Web SSH 终端" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "网页 SSH 终端" })).toBeInTheDocument();
     expect(screen.getByText("真实终端代理将在 WebSocket SSH 功能完成后启用。")).toBeInTheDocument();
   });
 
@@ -230,7 +259,7 @@ describe("App interactions", () => {
       "/api/commands/check": {
         body: {
           allowed: false,
-          reason: "rm -rf / style deletion",
+          reason: "检测到危险的递归强制删除命令。",
           requires_confirmation: false,
           warnings: []
         }
@@ -245,7 +274,7 @@ describe("App interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: /检查命令/ }));
 
     await waitFor(() => {
-      expect(screen.getByText("已拦截：rm -rf / style deletion")).toBeInTheDocument();
+      expect(screen.getByText("已拦截：检测到危险的递归强制删除命令。")).toBeInTheDocument();
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/commands/check",

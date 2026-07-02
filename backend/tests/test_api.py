@@ -19,7 +19,7 @@ def test_command_check_blocks_dangerous_command() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["allowed"] is False
-    assert "rm -rf" in body["reason"]
+    assert "危险的递归强制删除" in body["reason"]
 
 
 def test_validate_plan_returns_normalized_plan() -> None:

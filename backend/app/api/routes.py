@@ -25,6 +25,7 @@ from app.schemas.ai_provider import (
 from app.schemas.auth import AuthRequest, AuthResponse, UserResponse
 from app.schemas.deployment import DeploymentPlan
 from app.schemas.server import ServerCreate, ServerResponse, ServerSnapshotResponse, ServerUpdate
+from app.services.ssh_probe import probe_ssh_connection
 
 
 router = APIRouter(prefix="/api")
@@ -64,7 +65,7 @@ def health() -> dict[str, str]:
 def init_admin(payload: AuthRequest, db: Session = Depends(get_db)) -> AuthResponse:
     existing_user = db.scalar(select(User).limit(1))
     if existing_user is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="admin already initialized")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="管理员已经初始化。")
 
     user = User(username=payload.username, password_hash=hash_password(payload.password), role="admin")
     db.add(user)
@@ -83,7 +84,7 @@ def auth_status(db: Session = Depends(get_db)) -> dict[str, bool]:
 def login(payload: AuthRequest, db: Session = Depends(get_db)) -> AuthResponse:
     user = db.scalar(select(User).where(User.username == payload.username))
     if user is None or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid username or password")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误。")
     _audit(db, user, "auth.login", "user", user.id)
     return _auth_response(user)
 
@@ -198,7 +199,7 @@ def test_ai_provider(
     _ = current_user
     provider = _get_provider_or_404(provider_id, db)
     provider.last_test_status = "skipped"
-    provider.last_test_message = "AI connection test will call the provider in the next implementation slice."
+    provider.last_test_message = "AI 中转站连通性测试将在下一阶段接入真实请求。"
     provider.last_test_at = datetime.now(UTC)
     db.commit()
     db.refresh(provider)
@@ -385,8 +386,18 @@ def test_server_connection(
     db: Session = Depends(get_db),
 ) -> ServerResponse:
     server = _get_server_or_404(server_id, db)
-    server.status = "unchecked"
-    server.last_test_message = "SSH connection test will run in the executor implementation slice."
+    password = _cipher().decrypt(server.encrypted_password) if server.encrypted_password else None
+    private_key = _cipher().decrypt(server.encrypted_private_key) if server.encrypted_private_key else None
+    ok, message = async_run_ssh_probe(
+        host=server.host,
+        port=server.port,
+        username=server.username,
+        password=password,
+        private_key=private_key,
+    )
+    server.status = "online" if ok else "offline"
+    server.last_test_message = message
+    server.last_seen_at = datetime.now(UTC) if ok else None
     db.commit()
     db.refresh(server)
     _audit(db, current_user, "server.test", "server", server.id)
@@ -403,7 +414,7 @@ def create_server_snapshot(
     snapshot = ServerSnapshot(
         server_id=server.id,
         status="skipped",
-        message="Server snapshot requires the real SSH executor implementation slice.",
+        message="服务器资源快照将在真实 SSH 执行器接入后启用。",
     )
     db.add(snapshot)
     db.commit()
@@ -437,22 +448,43 @@ def _cipher() -> CredentialCipher:
 def _get_provider_or_404(provider_id: int, db: Session) -> AiProvider:
     provider = db.get(AiProvider, provider_id)
     if provider is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI provider not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到 AI 中转站。")
     return provider
 
 
 def _get_model_or_404(provider_id: int, model_id: str, db: Session) -> AiModel:
     model = db.scalar(select(AiModel).where(AiModel.provider_id == provider_id, AiModel.model_id == model_id))
     if model is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI model not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到 AI 模型。")
     return model
 
 
 def _get_server_or_404(server_id: int, db: Session) -> Server:
     server = db.get(Server, server_id)
     if server is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到服务器。")
     return server
+
+
+def async_run_ssh_probe(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str | None,
+    private_key: str | None,
+) -> tuple[bool, str]:
+    import asyncio
+
+    return asyncio.run(
+        probe_ssh_connection(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            private_key=private_key,
+        )
+    )
 
 
 def _ai_provider_response(provider: AiProvider) -> AiProviderResponse:

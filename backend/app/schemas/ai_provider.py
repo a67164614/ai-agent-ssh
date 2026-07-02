@@ -16,7 +16,7 @@ class AiProviderCreate(BaseModel):
     @classmethod
     def base_url_must_not_include_endpoint(cls, value: str) -> str:
         if "/chat/completions" in value:
-            raise ValueError("Base URL must end at /v1, not /chat/completions")
+            raise ValueError("接口基础地址应填写到 /v1，不要填写 /chat/completions。")
         return value.rstrip("/")
 
 

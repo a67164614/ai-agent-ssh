@@ -54,6 +54,14 @@ type ServerRecord = {
   last_test_message?: string | null;
 };
 
+const serverStatusLabels: Record<string, string> = {
+  online: "在线",
+  offline: "离线",
+  unknown: "未检测",
+  unchecked: "未检测",
+  skipped: "未启用"
+};
+
 type AiProvider = {
   id: number;
   name: string;
@@ -325,7 +333,14 @@ export function App() {
     try {
       const updated = await apiRequest<ServerRecord>(`/servers/${server.id}/test`, { method: "POST", token });
       setServers((items) => items.map((item) => (item.id === updated.id ? updated : item)));
-      setNotice({ tone: "success", message: updated.last_test_message ?? `${updated.name} 检查完成。` });
+      const fallback = `服务器状态：${formatServerStatus(updated.status)}`;
+      setNotice({
+        tone: updated.status === "online" ? "success" : "danger",
+        message:
+          updated.status === "online"
+            ? `服务器连接成功：${updated.last_test_message ?? fallback}`
+            : `服务器连接失败：${updated.last_test_message ?? fallback}`
+      });
     } catch (error) {
       setNotice({ tone: "danger", message: `服务器检查失败：${formatError(error)}` });
     } finally {
@@ -363,7 +378,7 @@ export function App() {
     try {
       const updated = await apiRequest<AiProvider>(`/ai-providers/${provider.id}/test`, { method: "POST", token });
       setProviders((items) => items.map((item) => (item.id === updated.id ? updated : item)));
-      setNotice({ tone: "success", message: updated.last_test_message ?? `${updated.name} 检查完成。` });
+      setNotice({ tone: "success", message: updated.last_test_message ?? `AI 中转站状态：${formatProviderStatus(updated.last_test_status)}` });
     } catch (error) {
       setNotice({ tone: "danger", message: `AI 中转站检查失败：${formatError(error)}` });
     } finally {
@@ -514,7 +529,7 @@ function OverviewSection({
   return (
     <>
       <section className="metric-grid" aria-label="系统概览">
-        <Metric icon={<Server />} label="服务器" value={String(servers.length)} detail={`${servers.filter((item) => item.status === "online").length} online`} />
+        <Metric icon={<Server />} label="服务器" value={String(servers.length)} detail={`${servers.filter((item) => item.status === "online").length} 台在线`} />
         <Metric icon={<Bot />} label="默认模型" value={defaultProvider?.default_model ?? "-"} detail={defaultProvider?.name ?? "未配置"} />
         <Metric icon={<ShieldAlert />} label="安全策略" value="启用" detail="危险命令拦截" />
         <Metric icon={<Database />} label="数据库" value="SQLite" detail="可迁移 PostgreSQL" />
@@ -603,14 +618,14 @@ function TerminalSection() {
       <div className="panel terminal-panel">
         <div className="panel-header compact">
           <div>
-            <h2>Web SSH 终端</h2>
+            <h2>网页 SSH 终端</h2>
             <p>真实终端代理将在 WebSocket SSH 功能完成后启用。</p>
           </div>
           <TerminalSquare size={18} />
         </div>
         <div className="terminal">
           <span>$ systemctl status demo.service</span>
-          <span>Active: waiting for WebSocket SSH executor</span>
+          <span>状态：等待 WebSocket SSH 终端接入</span>
         </div>
       </div>
     </section>
@@ -680,8 +695,8 @@ function DeploySection({ isLoading, onValidatePlan }: { isLoading: boolean; onVa
           <Cpu size={18} />
         </div>
         <Resource label="CPU" value="-" />
-        <Resource label="Memory" value="-" />
-        <Resource label="Disk" value="-" icon={<HardDrive size={16} />} />
+        <Resource label="内存" value="-" />
+        <Resource label="磁盘" value="-" icon={<HardDrive size={16} />} />
       </div>
     </section>
   );
@@ -736,11 +751,11 @@ function SettingsSection({
             <input value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} />
           </label>
           <label>
-            Base URL
+            接口基础地址
             <input value={form.base_url} onChange={(event) => onChange({ ...form, base_url: event.target.value })} />
           </label>
           <label>
-            API Key
+            API 密钥
             <input type="password" value={form.api_key} onChange={(event) => onChange({ ...form, api_key: event.target.value })} />
           </label>
           <label>
@@ -794,11 +809,12 @@ function ServerTable({
           <span>{server.host}:{server.port}</span>
           <span>{server.username}</span>
           <span>{server.has_private_key ? "私钥" : "密码"}</span>
-          <span>{server.connection_mode}</span>
-          <span className={`status ${server.status}`}>{server.status}</span>
+          <span>{formatConnectionMode(server.connection_mode)}</span>
+          <span className={`status ${server.status}`}>{formatServerStatus(server.status)}</span>
           <button className="ghost-action compact-button" onClick={() => onTestServer(server)} type="button" disabled={isLoading}>
             测试
           </button>
+          {server.last_test_message && <small className="row-message">{server.last_test_message}</small>}
         </div>
       ))}
       {servers.length === 0 && <div className="empty-state">暂无服务器，请先添加。</div>}
@@ -894,14 +910,33 @@ async function readErrorMessage(response: Response) {
       if (field === "password" && first.msg?.includes("8")) {
         return "密码至少需要 8 位。";
       }
-      return first.msg ?? `HTTP ${response.status}`;
+      return first.msg ?? `请求失败：后端返回 ${response.status}。`;
     }
   } catch {
-    return `HTTP ${response.status}`;
+    return `请求失败：后端返回 ${response.status}。`;
   }
-  return `HTTP ${response.status}`;
+  return `请求失败：后端返回 ${response.status}。`;
 }
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : "未知错误";
+}
+
+function formatServerStatus(status: string) {
+  return serverStatusLabels[status] ?? "未知状态";
+}
+
+function formatProviderStatus(status: string | null | undefined) {
+  if (!status) {
+    return "未检测";
+  }
+  return {
+    ok: "正常",
+    failed: "失败",
+    skipped: "未启用"
+  }[status] ?? "未知状态";
+}
+
+function formatConnectionMode(mode: string) {
+  return mode === "ssh" ? "SSH" : mode;
 }

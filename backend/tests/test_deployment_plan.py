@@ -46,7 +46,7 @@ def test_rejects_dangerous_deployment_step() -> None:
             }
         )
 
-    assert "dangerous command" in str(exc_info.value)
+    assert "已拦截危险命令" in str(exc_info.value)
 
 
 def test_rejects_empty_steps() -> None:

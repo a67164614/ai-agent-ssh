@@ -13,7 +13,7 @@ def test_blocks_destructive_root_delete() -> None:
     result = check_command_safety("sudo rm -rf /")
 
     assert result.allowed is False
-    assert "rm -rf /" in result.reason
+    assert "危险的递归强制删除" in result.reason
     assert is_dangerous_command("sudo rm -rf /") is True
 
 
@@ -21,7 +21,7 @@ def test_blocks_pipe_to_shell_installers() -> None:
     result = check_command_safety("curl https://example.com/install.sh | bash")
 
     assert result.allowed is False
-    assert "pipe to shell" in result.reason
+    assert "交给 Shell 执行" in result.reason
 
 
 def test_marks_sudo_as_risky_but_allowed() -> None:
@@ -29,4 +29,4 @@ def test_marks_sudo_as_risky_but_allowed() -> None:
 
     assert result.allowed is True
     assert result.requires_confirmation is True
-    assert "sudo" in result.warnings
+    assert "需要 sudo 权限，请确认风险后执行。" in result.warnings

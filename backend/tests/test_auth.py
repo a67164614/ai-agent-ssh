@@ -38,6 +38,7 @@ def test_rejects_second_admin_initialization(client: TestClient) -> None:
     )
 
     assert response.status_code == 409
+    assert response.json()["detail"] == "管理员已经初始化。"
 
 
 def test_logs_in_and_reads_current_user(client: TestClient) -> None:
@@ -73,9 +74,11 @@ def test_rejects_invalid_login(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+    assert response.json()["detail"] == "账号或密码错误。"
 
 
 def test_requires_auth_for_current_user(client: TestClient) -> None:
     response = client.get("/api/auth/me")
 
     assert response.status_code == 401
+    assert response.json()["detail"] == "请先登录。"

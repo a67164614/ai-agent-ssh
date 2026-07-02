@@ -20,7 +20,7 @@ class DeploymentStep(BaseModel):
     def command_must_be_safe(cls, value: str) -> str:
         safety = check_command_safety(value)
         if not safety.allowed:
-            raise ValueError(f"dangerous command blocked: {safety.reason}")
+            raise ValueError(f"已拦截危险命令：{safety.reason}")
         return value
 
 

@@ -21,7 +21,7 @@ class ServerCreate(BaseModel):
     def host_must_not_include_scheme(cls, value: str) -> str:
         normalized = value.strip()
         if "://" in normalized:
-            raise ValueError("Server host must not include URL scheme")
+            raise ValueError("服务器主机地址不能包含 URL 协议。")
         return normalized
 
 

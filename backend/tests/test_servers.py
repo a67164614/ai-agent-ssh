@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -90,20 +91,59 @@ def test_lists_updates_and_deletes_server(client: TestClient) -> None:
     assert client.get("/api/servers", headers=headers).json() == []
 
 
-def test_tests_server_connection_without_real_ssh(client: TestClient) -> None:
+def test_tests_server_connection_with_real_ssh_probe(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     headers = _auth_headers(client)
     server = client.post(
         "/api/servers",
         headers=headers,
         json={"name": "legacy-api", "host": "172.16.4.8", "username": "root", "password": "secret"},
     ).json()
+    calls: list[dict[str, object]] = []
+
+    async def fake_probe(**kwargs: object) -> tuple[bool, str]:
+        calls.append(kwargs)
+        return True, "SSH 连接成功。"
+
+    monkeypatch.setattr("app.api.routes.probe_ssh_connection", fake_probe)
 
     response = client.post(f"/api/servers/{server['id']}/test", headers=headers)
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "unchecked"
-    assert body["last_test_message"] == "SSH connection test will run in the executor implementation slice."
+    assert body["status"] == "online"
+    assert body["last_test_message"] == "SSH 连接成功。"
+    assert body["last_seen_at"] is not None
+    assert calls == [
+        {
+            "host": "172.16.4.8",
+            "port": 22,
+            "username": "root",
+            "password": "secret",
+            "private_key": None,
+        }
+    ]
+
+
+def test_marks_server_offline_when_ssh_probe_fails(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = _auth_headers(client)
+    server = client.post(
+        "/api/servers",
+        headers=headers,
+        json={"name": "bad-host", "host": "1", "username": "root", "password": "secret"},
+    ).json()
+
+    async def fake_probe(**_: object) -> tuple[bool, str]:
+        return False, "SSH 连接失败：无法连接到服务器。"
+
+    monkeypatch.setattr("app.api.routes.probe_ssh_connection", fake_probe)
+
+    response = client.post(f"/api/servers/{server['id']}/test", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "offline"
+    assert body["last_test_message"] == "SSH 连接失败：无法连接到服务器。"
+    assert body["last_seen_at"] is None
 
 
 def test_creates_server_snapshot_and_audit_log(client: TestClient, db_session: Session) -> None:
@@ -121,7 +161,7 @@ def test_creates_server_snapshot_and_audit_log(client: TestClient, db_session: S
     assert body["server_id"] == server["id"]
     assert body["status"] == "skipped"
     assert body["cpu_usage"] is None
-    assert "real SSH executor" in body["message"]
+    assert "真实 SSH 执行器" in body["message"]
     assert db_session.scalar(select(ServerSnapshot).where(ServerSnapshot.server_id == server["id"])) is not None
 
     audit_actions = [log.action for log in db_session.scalars(select(AuditLog).order_by(AuditLog.id)).all()]

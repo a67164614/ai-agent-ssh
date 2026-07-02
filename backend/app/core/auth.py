@@ -41,11 +41,11 @@ def decode_access_token(token: str) -> int:
         decoded = base64.urlsafe_b64decode(token.encode("utf-8")).decode("utf-8")
         user_id, _username, _issued_at, _nonce, signature = decoded.split(":", 4)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token") from exc
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态无效，请重新登录。") from exc
 
     payload = decoded.rsplit(":", 1)[0]
     if not hmac.compare_digest(signature, _sign(payload)):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态无效，请重新登录。")
     return int(user_id)
 
 
@@ -54,12 +54,12 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> User:
     if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录。")
 
     user_id = decode_access_token(credentials.credentials)
     user = db.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在，请重新登录。")
     return user
 
 
