@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
@@ -384,7 +384,7 @@ describe("App interactions", () => {
 
     expect(instances[0].url).toContain("/api/servers/1/terminal");
     expect(instances[0].sent).toContain("pwd\n");
-    expect(screen.getByText("root@10.0.12.21:~# pwd")).toBeInTheDocument();
+    expect(screen.getByText("root@prod-app-01:~# pwd")).toBeInTheDocument();
   });
 
   test("routes double-slash terminal input to the AI assistant", async () => {
@@ -418,6 +418,40 @@ describe("App interactions", () => {
     });
     expect(await screen.findByText("AI 建议命令：df -h && free -h")).toBeInTheDocument();
     expect(screen.getByText("AI 说明：查看磁盘和内存使用情况。")).toBeInTheDocument();
+  });
+
+  test("supports Chinese input, paste, copy and compact prompt in the terminal", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": { body: [serverRecord] }
+    });
+
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
+    expect(screen.queryByRole("status", { name: "" })).not.toBeInTheDocument();
+
+    const terminal = screen.getByRole("textbox", { name: "终端窗口" });
+    terminal.focus();
+    fireEvent.compositionStart(terminal);
+    fireEvent.compositionUpdate(terminal, { data: "//查看日志" });
+    fireEvent.compositionEnd(terminal, { data: "//查看日志" });
+    expect(screen.getByText(/root@prod-app-01:~#/)).toBeInTheDocument();
+    expect(screen.getByText("//查看日志")).toBeInTheDocument();
+
+    fireEvent.paste(terminal, {
+      clipboardData: {
+        getData: () => " && tail -n 50 /var/log/syslog"
+      }
+    });
+    expect(screen.getByText("//查看日志 && tail -n 50 /var/log/syslog")).toBeInTheDocument();
+
+    await userEvent.keyboard("{Control>}c{/Control}");
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("//查看日志 && tail -n 50 /var/log/syslog"));
   });
 
   test("opens server detail and supports snapshot refresh, edit and delete", async () => {

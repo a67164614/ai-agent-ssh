@@ -281,6 +281,13 @@ export function App() {
     [activeSection]
   );
   const activeServer = selectedServer ?? servers[0] ?? null;
+  const shouldShowNotice = notice.message !== "等待操作。";
+
+  useEffect(() => {
+    if (!shouldShowNotice) return;
+    const timer = window.setTimeout(() => setNotice({ tone: "neutral", message: "等待操作。" }), 3200);
+    return () => window.clearTimeout(timer);
+  }, [notice.message, shouldShowNotice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -843,9 +850,11 @@ export function App() {
           </button>
         </header>
 
-        <div className={`notice ${notice.tone}`} role="status">
-          {notice.message}
-        </div>
+        {shouldShowNotice && (
+          <div className={`toast-notice ${notice.tone}`} role="status">
+            {notice.message}
+          </div>
+        )}
 
         {showServerForm && (
           <ServerFormPanel
@@ -1061,9 +1070,9 @@ function TerminalSection({
   ]);
   const [activeRailTab, setActiveRailTab] = useState<"servers" | "audit" | "commands">("servers");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const activeServer = server ?? servers[0] ?? null;
-  const promptHost = activeServer?.latest_snapshot?.ip_addresses?.split(",")[0]?.trim() || activeServer?.host;
-  const prompt = activeServer ? `${activeServer.username}@${promptHost}:~#` : "未选择服务器:~#";
+  const prompt = activeServer ? `${activeServer.username}@${activeServer.name}:~#` : "未选择服务器:~#";
 
   function connect(targetServer = activeServer) {
     if (!targetServer) {
@@ -1139,6 +1148,17 @@ function TerminalSection({
   }
 
   function handleTerminalKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (isComposing) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+      if (draft) {
+        event.preventDefault();
+        void navigator.clipboard?.writeText(draft);
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+      return;
+    }
     if (event.ctrlKey && event.key.toLowerCase() === "l") {
       event.preventDefault();
       setLines(["终端已清屏。"]);
@@ -1165,6 +1185,19 @@ function TerminalSection({
     }
   }
 
+  function handleCompositionEnd(event: React.CompositionEvent<HTMLDivElement>) {
+    setIsComposing(false);
+    const value = event.data;
+    if (value) setDraft((current) => `${current}${value}`);
+  }
+
+  function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    const text = event.clipboardData.getData("text/plain") || event.clipboardData.getData("text");
+    if (!text) return;
+    event.preventDefault();
+    setDraft((value) => `${value}${text}`);
+  }
+
   return (
     <section className="terminal-workbench" aria-label="SSH 工作台">
       <div className="terminal-stage">
@@ -1188,6 +1221,9 @@ function TerminalSection({
           aria-label="终端窗口"
           tabIndex={0}
           onKeyDown={handleTerminalKeyDown}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={handleCompositionEnd}
+          onPaste={handlePaste}
         >
           <div className="terminal-output">
             {lines.map((line, index) => (

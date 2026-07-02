@@ -455,6 +455,36 @@ p {
   background: #fff1f1;
 }
 
+.toast-notice {
+  position: fixed;
+  top: 18px;
+  right: 24px;
+  z-index: 30;
+  min-width: 260px;
+  max-width: min(420px, calc(100vw - 32px));
+  min-height: 42px;
+  border-radius: 8px;
+  border: 1px solid #d8e2ee;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: #405166;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.16);
+}
+
+.toast-notice.success {
+  color: #087443;
+  border-color: #a7e7c4;
+  background: #effbf5;
+}
+
+.toast-notice.danger {
+  color: #9d1c1c;
+  border-color: #ffc7c7;
+  background: #fff1f1;
+}
+
 .step-list {
   margin: 0;
   padding-left: 22px;
@@ -597,15 +627,21 @@ p {
 }
 
 .terminal-input-line {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
   color: #f8fafc;
+  min-width: 0;
 }
 
 .terminal-input-line strong {
+  flex: 0 0 auto;
   color: #86efac;
   font-weight: 700;
+}
+
+.terminal-input-line span {
+  min-width: 0;
 }
 
 .terminal-input-line i {
