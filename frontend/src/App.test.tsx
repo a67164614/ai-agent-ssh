@@ -5,6 +5,65 @@ import { App } from "./App";
 
 const fetchMock = vi.fn();
 
+type MockApiReply = {
+  body: unknown;
+  ok?: boolean;
+  status?: number;
+};
+
+type MockApiRoutes = Record<string, MockApiReply | ((init?: RequestInit) => MockApiReply)>;
+
+const adminUser = { id: 1, username: "admin", role: "admin" };
+
+const serverRecord = {
+  id: 1,
+  name: "prod-app-01",
+  host: "10.0.12.21",
+  port: 22,
+  username: "root",
+  auth_type: "password",
+  remark: null,
+  status: "unknown",
+  connection_mode: "ssh",
+  has_password: true,
+  has_private_key: false
+};
+
+const providerRecord = {
+  id: 1,
+  name: "Relay",
+  provider_type: "openai-compatible",
+  base_url: "https://relay.example/v1",
+  default_model: "deepseek-chat",
+  api_mode: "chat_completions",
+  enabled: true,
+  has_api_key: true,
+  api_key_mask: "sk-t********test"
+};
+
+function mockApi(routes: MockApiRoutes = {}) {
+  fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    const route = routes[path] ?? {
+      "/api/auth/status": { body: { initialized: false } },
+      "/api/auth/me": { body: { detail: "Not authenticated" }, ok: false, status: 401 },
+      "/api/servers": { body: [] },
+      "/api/ai-providers": { body: [] }
+    }[path];
+
+    if (!route) {
+      throw new Error(`No mock response for ${path}`);
+    }
+
+    const reply = typeof route === "function" ? route(init) : route;
+    return {
+      ok: reply.ok ?? true,
+      status: reply.status ?? (reply.ok === false ? 500 : 200),
+      json: async () => reply.body
+    };
+  });
+}
+
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
@@ -12,40 +71,40 @@ beforeEach(() => {
 });
 
 describe("App interactions", () => {
-  test("shows a clear validation message for short admin password", async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: async () => ({ detail: "Not authenticated" })
+  test("shows login mode after admin has already been initialized", async () => {
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } }
     });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "初始化管理员" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+  });
+
+  test("shows a clear validation message for short admin password", async () => {
+    mockApi();
 
     render(<App />);
     await userEvent.type(screen.getByLabelText("账号"), "admin");
     await userEvent.type(screen.getByLabelText("密码"), "123456");
-    await userEvent.click(screen.getByRole("button", { name: "初始化管理员" }));
+    await userEvent.click(await screen.findByRole("button", { name: "初始化管理员" }));
 
     expect(screen.getByText("认证失败：密码至少需要 8 位。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("initializes an admin and loads protected resources", async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        json: async () => ({ detail: "Not authenticated" })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ access_token: "token-1", user: { id: 1, username: "admin", role: "admin" } })
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] });
+    mockApi({
+      "/api/auth/init": { body: { access_token: "token-1", user: adminUser } }
+    });
 
     render(<App />);
     await userEvent.type(screen.getByLabelText("账号"), "admin");
     await userEvent.type(screen.getByLabelText("密码"), "strong-password");
-    await userEvent.click(screen.getByRole("button", { name: "初始化管理员" }));
+    await userEvent.click(await screen.findByRole("button", { name: "初始化管理员" }));
 
     await waitFor(() => {
       expect(screen.getAllByText("登录用户：admin").length).toBeGreaterThan(0);
@@ -55,33 +114,13 @@ describe("App interactions", () => {
 
   test("renders server data from the API and creates a server", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ id: 1, username: "admin", role: "admin" })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          {
-            id: 1,
-            name: "prod-app-01",
-            host: "10.0.12.21",
-            port: 22,
-            username: "root",
-            auth_type: "password",
-            remark: null,
-            status: "unknown",
-            connection_mode: "ssh",
-            has_password: true,
-            has_private_key: false
-          }
-        ]
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": (init) => ({
+        body:
+          init?.method === "POST"
+            ? {
           id: 2,
           name: "staging-web",
           host: "10.0.12.33",
@@ -93,8 +132,11 @@ describe("App interactions", () => {
           connection_mode: "ssh",
           has_password: true,
           has_private_key: false
-        })
-      });
+              }
+            : [serverRecord]
+      }),
+      "/api/ai-providers": { body: [] }
+    });
 
     render(<App />);
     await waitFor(() => {
@@ -125,24 +167,11 @@ describe("App interactions", () => {
 
   test("creates an AI provider through the API", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, username: "admin", role: "admin" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: 1,
-          name: "Relay",
-          provider_type: "openai-compatible",
-          base_url: "https://relay.example/v1",
-          default_model: "deepseek-chat",
-          api_mode: "chat_completions",
-          enabled: true,
-          has_api_key: true,
-          api_key_mask: "sk-t********test"
-        })
-      });
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/ai-providers": (init) => ({ body: init?.method === "POST" ? providerRecord : [] })
+    });
 
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: /系统设置/ }));
@@ -163,10 +192,10 @@ describe("App interactions", () => {
 
   test("switches sidebar sections", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, username: "admin", role: "admin" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] });
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser }
+    });
 
     render(<App />);
 
@@ -178,14 +207,11 @@ describe("App interactions", () => {
 
   test("checks backend health through the API", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, username: "admin", role: "admin" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ status: "ok", service: "ai-agent-ssh" })
-      });
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/health": { body: { status: "ok", service: "ai-agent-ssh" } }
+    });
 
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: /检查后端/ }));
@@ -198,19 +224,18 @@ describe("App interactions", () => {
 
   test("checks a dangerous command through the API", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, username: "admin", role: "admin" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/commands/check": {
+        body: {
           allowed: false,
           reason: "rm -rf / style deletion",
           requires_confirmation: false,
           warnings: []
-        })
-      });
+        }
+      }
+    });
 
     render(<App />);
     const navigation = await screen.findByRole("navigation", { name: "主导航" });
@@ -230,14 +255,11 @@ describe("App interactions", () => {
 
   test("validates deployment plan through the API", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, username: "admin", role: "admin" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ valid: true, plan: { steps: [{ name: "构建" }] } })
-      });
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/deployments/validate-plan": { body: { valid: true, plan: { steps: [{ name: "构建" }] } } }
+    });
 
     render(<App />);
     const navigation = await screen.findByRole("navigation", { name: "主导航" });
@@ -247,5 +269,26 @@ describe("App interactions", () => {
     await waitFor(() => {
       expect(screen.getByText("部署计划校验通过，共 1 个步骤。")).toBeInTheDocument();
     });
+  });
+
+  test("keeps authenticated session when resource loading fails during refresh", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": {
+        body: { detail: "no such column: servers.last_test_message" },
+        ok: false,
+        status: 500
+      }
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "概览" })).toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem("ai-agent-ssh-token")).toBe("token-1");
+    expect(screen.getByText("资源加载失败：no such column: servers.last_test_message")).toBeInTheDocument();
   });
 });

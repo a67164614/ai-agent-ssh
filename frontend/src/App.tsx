@@ -35,6 +35,10 @@ type AuthResponse = {
   user: User;
 };
 
+type AuthStatus = {
+  initialized: boolean;
+};
+
 type ServerRecord = {
   id: number;
   name: string;
@@ -140,6 +144,8 @@ export function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [token, setToken] = useState(() => window.localStorage.getItem(tokenKey) ?? "");
   const [user, setUser] = useState<User | null>(null);
+  const [isAdminInitialized, setIsAdminInitialized] = useState(false);
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
   const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [servers, setServers] = useState<ServerRecord[]>([]);
   const [providers, setProviders] = useState<AiProvider[]>([]);
@@ -156,13 +162,40 @@ export function App() {
     let cancelled = false;
     async function bootstrap() {
       try {
-        const me = await apiRequest<User>("/auth/me", { token });
-        if (cancelled) return;
-        setUser(me);
-        await loadResources(token);
+        if (token) {
+          const me = await apiRequest<User>("/auth/me", { token });
+          if (cancelled) return;
+          setUser(me);
+          setIsAdminInitialized(true);
+          try {
+            await loadResources(token);
+          } catch (error) {
+            if (!cancelled) {
+              setNotice({ tone: "danger", message: `资源加载失败：${formatError(error)}` });
+            }
+          }
+          return;
+        }
       } catch {
         if (!cancelled) {
+          window.localStorage.removeItem(tokenKey);
+          setToken("");
           setUser(null);
+        }
+      } finally {
+        try {
+          const status = await apiRequest<AuthStatus>("/auth/status");
+          if (!cancelled) {
+            setIsAdminInitialized(status.initialized);
+          }
+        } catch {
+          if (!cancelled) {
+            setIsAdminInitialized(true);
+            setNotice({ tone: "danger", message: "认证状态检查失败，请确认后端服务是否正常。" });
+          }
+        }
+        if (!cancelled) {
+          setIsAuthChecked(true);
         }
       }
     }
@@ -196,6 +229,7 @@ export function App() {
       window.localStorage.setItem(tokenKey, body.access_token);
       setToken(body.access_token);
       setUser(body.user);
+      setIsAdminInitialized(true);
       await loadResources(body.access_token);
       setNotice({ tone: "success", message: `登录用户：${body.user.username}` });
     } catch (error) {
@@ -363,9 +397,11 @@ export function App() {
             </label>
           </div>
           <div className="button-row">
-            <button className="primary-action" onClick={() => void submitAuth("init")} type="button" disabled={isLoading}>
-              初始化管理员
-            </button>
+            {!isAdminInitialized && isAuthChecked && (
+              <button className="primary-action" onClick={() => void submitAuth("init")} type="button" disabled={isLoading}>
+                初始化管理员
+              </button>
+            )}
             <button className="ghost-action" onClick={() => void submitAuth("login")} type="button" disabled={isLoading}>
               登录
             </button>

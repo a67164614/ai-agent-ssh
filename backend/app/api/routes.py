@@ -74,6 +74,11 @@ def init_admin(payload: AuthRequest, db: Session = Depends(get_db)) -> AuthRespo
     return _auth_response(user)
 
 
+@router.get("/auth/status")
+def auth_status(db: Session = Depends(get_db)) -> dict[str, bool]:
+    return {"initialized": db.scalar(select(User).limit(1)) is not None}
+
+
 @router.post("/auth/login", response_model=AuthResponse)
 def login(payload: AuthRequest, db: Session = Depends(get_db)) -> AuthResponse:
     user = db.scalar(select(User).where(User.username == payload.username))

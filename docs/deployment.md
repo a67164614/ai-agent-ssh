@@ -105,17 +105,15 @@ docker compose logs -f ai-agent-ssh
 
 ## 数据库变更注意
 
-当前后端使用 SQLAlchemy `create_all` 初始化表结构，尚未引入 Alembic 迁移。首次部署没有问题；如果服务器上已经有旧版本 SQLite 数据库，新增字段可能不会自动补齐。
+当前后端使用 SQLAlchemy `create_all` 初始化表结构，尚未引入 Alembic 迁移。应用启动时会对 SQLite 旧库执行轻量升级，自动补齐当前已知新增字段，并创建缺失的新表。这个过程不会删除已有管理员、服务器或 AI 中转站数据。
 
-开发环境可先备份再重建数据卷：
+如果更新后 `/api/servers` 或 `/api/ai-providers` 仍然返回 500，请先查看容器日志：
 
 ```bash
-docker compose down
-docker volume ls | grep ai
-docker compose up -d --build
+docker compose logs -f ai-agent-ssh
 ```
 
-生产环境不要直接删除数据卷。应先备份 `/app/data/ai_agent_ssh.db`，再补迁移脚本。
+开发环境可先备份再重建数据卷；生产环境不要直接删除数据卷。应先备份 `/app/data/ai_agent_ssh.db`，再按日志补充迁移脚本。
 
 ## 当前 MVP 限制
 

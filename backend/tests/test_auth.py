@@ -18,6 +18,17 @@ def test_initializes_first_admin(client: TestClient) -> None:
     assert "password" not in body["user"]
 
 
+def test_reports_admin_initialization_status(client: TestClient) -> None:
+    before_response = client.get("/api/auth/status")
+    client.post("/api/auth/init", json={"username": "admin", "password": "strong-password"})
+    after_response = client.get("/api/auth/status")
+
+    assert before_response.status_code == 200
+    assert before_response.json() == {"initialized": False}
+    assert after_response.status_code == 200
+    assert after_response.json() == {"initialized": True}
+
+
 def test_rejects_second_admin_initialization(client: TestClient) -> None:
     client.post("/api/auth/init", json={"username": "admin", "password": "strong-password"})
 
