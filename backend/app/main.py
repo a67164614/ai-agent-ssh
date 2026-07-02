@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.routes import terminal_websocket
 from app.api.routes import router
 from app.db.init_db import init_db
 
@@ -27,6 +28,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
+app.websocket("/api/servers/{server_id}/terminal")(terminal_websocket)
 
 static_dir = Path(__file__).resolve().parent.parent / "static"
 if static_dir.exists():

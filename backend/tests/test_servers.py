@@ -146,7 +146,7 @@ def test_marks_server_offline_when_ssh_probe_fails(client: TestClient, monkeypat
     assert body["last_seen_at"] is None
 
 
-def test_creates_server_snapshot_and_audit_log(client: TestClient, db_session: Session) -> None:
+def test_creates_server_snapshot_and_audit_log(client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     headers = _auth_headers(client)
     server = client.post(
         "/api/servers",
@@ -154,14 +154,41 @@ def test_creates_server_snapshot_and_audit_log(client: TestClient, db_session: S
         json={"name": "snapshot-host", "host": "10.0.0.9", "username": "root", "password": "secret"},
     ).json()
 
+    def fake_run_server_command(**_: object) -> tuple[int, str, str]:
+        return (
+            0,
+            "\n".join(
+                [
+                    "OS=Ubuntu 22.04.4 LTS",
+                    "KERNEL=6.5.0-35-generic",
+                    "CPU_CORES=4",
+                    "CPU_USAGE=12.50",
+                    "MEMORY_TOTAL_MB=7936",
+                    "MEMORY_USED_MB=2048",
+                    "MEMORY_USAGE=25.81",
+                    "DISK_TOTAL_GB=98.30",
+                    "DISK_USED_GB=36.40",
+                    "DISK_USAGE=37",
+                    "IP_ADDRESSES=10.0.0.8",
+                ]
+            ),
+            "",
+        )
+
+    monkeypatch.setattr("app.api.routes.run_server_command", fake_run_server_command)
+
     response = client.post(f"/api/servers/{server['id']}/snapshot", headers=headers)
 
     assert response.status_code == 200
     body = response.json()
     assert body["server_id"] == server["id"]
-    assert body["status"] == "skipped"
-    assert body["cpu_usage"] is None
-    assert "真实 SSH 执行器" in body["message"]
+    assert body["status"] == "ok"
+    assert body["cpu_usage"] == 12.5
+    assert body["cpu_cores"] == 4
+    assert body["memory_usage"] == 25.81
+    assert body["disk_usage"] == 37.0
+    assert body["os_info"] == "Ubuntu 22.04.4 LTS"
+    assert body["message"] == "服务器资源快照采集成功。"
     assert db_session.scalar(select(ServerSnapshot).where(ServerSnapshot.server_id == server["id"])) is not None
 
     audit_actions = [log.action for log in db_session.scalars(select(AuditLog).order_by(AuditLog.id)).all()]

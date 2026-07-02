@@ -25,6 +25,15 @@ def upgrade_sqlite_schema(target_engine: Engine) -> None:
         "servers": {
             "last_test_message": "ALTER TABLE servers ADD COLUMN last_test_message TEXT",
         },
+        "server_snapshots": {
+            "cpu_cores": "ALTER TABLE server_snapshots ADD COLUMN cpu_cores INTEGER",
+            "memory_total_mb": "ALTER TABLE server_snapshots ADD COLUMN memory_total_mb INTEGER",
+            "memory_used_mb": "ALTER TABLE server_snapshots ADD COLUMN memory_used_mb INTEGER",
+            "disk_total_gb": "ALTER TABLE server_snapshots ADD COLUMN disk_total_gb FLOAT",
+            "disk_used_gb": "ALTER TABLE server_snapshots ADD COLUMN disk_used_gb FLOAT",
+            "kernel": "ALTER TABLE server_snapshots ADD COLUMN kernel VARCHAR(255)",
+            "ip_addresses": "ALTER TABLE server_snapshots ADD COLUMN ip_addresses TEXT",
+        },
         "ai_providers": {
             "last_test_status": "ALTER TABLE ai_providers ADD COLUMN last_test_status VARCHAR(30)",
             "last_test_message": "ALTER TABLE ai_providers ADD COLUMN last_test_message TEXT",

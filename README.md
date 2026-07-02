@@ -1,34 +1,29 @@
 # AI Agent SSH
 
-AI Agent SSH 是一个轻量级 AI SSH 运维面板的基础工程。当前版本采用 React/Vite 前端和 FastAPI 后端，并支持打包成单个 Docker 服务。
+AI Agent SSH 是一个面向个人服务器和小团队内网环境的 AI SSH 运维面板。项目采用 React/Vite 前端、FastAPI 后端和 SQLite 持久化，支持打包成单个 Docker 服务部署。
 
-当前已包含：
+当前版本已经打通基础运维闭环：
 
-- FastAPI 应用骨架和健康检查接口。
-- 单管理员初始化、登录和 Bearer token 认证。
-- SSH 凭据、AI API Key 加密保存和脱敏返回。
-- AI 中转站供应商管理和模型手动管理接口。
-- 服务器基础信息管理、真实 SSH 连接测试接口和快照占位接口。
-- 基础审计日志写入。
-- 危险命令检测。
-- 部署计划执行前校验。
-- SQLite 持久化基础，包含用户、服务器、AI 中转站、模型和审计日志表结构。
-- React 运维面板，支持登录、服务器新增、AI 中转站新增和接口联调。
-- Docker Compose 部署配置。
-
-当前尚未实现：
-
-- SSH 命令执行。
-- 网页 SSH 终端代理。
-- 真实 AI 连接测试和模型拉取。
-- 服务包上传和真实部署执行。
-- 服务器详情、快照刷新、编辑和删除的完整前端交互。
+- 单管理员初始化、登录、登出和 Bearer token 认证。
+- SSH 凭据、AI API Key 加密保存，接口只返回脱敏状态。
+- AI 中转站管理、真实连接测试、`/models` 模型拉取、手动模型维护和默认模型设置。
+- 服务器新增、编辑、删除、列表、详情、真实 SSH 连接测试和资源快照刷新。
+- Web SSH 终端代理，前端通过 WebSocket 连接目标服务器。
+- AI 助手接口，支持命令建议、命令输出总结和基础对话。
+- 受控命令执行，执行前进行危险命令拦截，执行结果写入命令日志。
+- 服务包上传、SHA256 记录、压缩包安全解压、项目类型识别和部署计划生成。
+- 部署任务创建、确认执行、取消、历史查询和步骤日志记录。
+- 基础审计日志，记录管理员、AI 中转站和服务器关键操作。
+- SQLite 持久化基础，启动时会对旧库执行轻量字段补齐。
+- React 运维面板，支持首页概览、服务器管理、终端、AI 助手、服务部署、历史记录和系统设置。
+- Docker Compose 单容器部署配置。
 
 ## 技术栈
 
 - 前端：React、Vite、TypeScript、lucide-react、@xterm/xterm。
-- 后端：FastAPI、Pydantic、SQLAlchemy、SQLite。
-- 后续后端集成：OpenAI-compatible AI 网关、Redis 任务队列。
+- 后端：FastAPI、Pydantic、SQLAlchemy、SQLite、AsyncSSH。
+- AI 接入：OpenAI-compatible API。
+- 测试：pytest、Vitest、Testing Library。
 - 部署：Docker、Docker Compose。
 
 ## 本地开发
@@ -74,12 +69,14 @@ http://localhost:8088
 curl http://localhost:8088/api/health
 ```
 
+服务器部署和更新步骤见 `docs/deployment.md`。
+
 ## 环境变量
 
 | 名称 | 必填 | 说明 |
 | --- | --- | --- |
-| `APP_SECRET` | 是 | 应用密钥，后续用于会话签名。生产环境必须修改。 |
-| `CREDENTIAL_SECRET` | 是 | SSH 凭据和 AI API Key 的加密密钥。生产环境必须修改。 |
+| `APP_SECRET` | 是 | 应用 token 签名密钥，生产环境必须修改为强随机值。 |
+| `CREDENTIAL_SECRET` | 是 | SSH 凭据和 AI API Key 的加密密钥，生产环境必须修改并长期保持稳定。 |
 | `DATABASE_URL` | 否 | Docker 中默认使用 `/app/data/ai_agent_ssh.db` 作为 SQLite 数据库。 |
 | `AI_BASE_URL` | 否 | 首次初始化使用的 OpenAI-compatible Base URL。填写到 `/v1`，不要填写 `/chat/completions`。 |
 | `AI_API_KEY` | 否 | 首次初始化使用的 AI API Key。 |
@@ -91,22 +88,21 @@ curl http://localhost:8088/api/health
 backend/
   app/
     api/          FastAPI 路由
-    core/         配置和命令安全逻辑
-    db/           SQLAlchemy 模型和会话配置
-    schemas/      Pydantic 请求和领域模型
+    core/         配置、认证、加密和命令安全逻辑
+    db/           SQLAlchemy 模型、会话和轻量升级逻辑
+    schemas/      Pydantic 请求和响应模型
+    services/     AI、SSH、快照和项目分析服务
   tests/          pytest 测试
 frontend/
-  src/            React 应用界面
+  src/            React 运维面板和交互测试
 docs/
   deployment.md   部署说明
-  plans/          实施计划
+  需求/           PRD、架构、任务拆解和交付摘要
+  项目上下文/     当前上下文、会话日志和遗留事项
 ```
 
-## 后续路线
+## 当前边界
 
-1. 增加真实 AI HTTP 连接测试和 `/models` 拉取。
-2. 增加基于 SSH 的只读资源快照采集和受控命令执行。
-3. 拆分前端 API client、类型和页面组件，补齐编辑/删除/详情交互。
-4. 增加基于 @xterm/xterm 的 WebSocket SSH 终端。
-5. 增加服务包上传、项目分析器和 AI 部署计划生成。
-6. 增加部署任务引擎、日志、取消任务和回滚记录。
+- 当前认证适合个人或内网面板，公网长期暴露前建议加 HTTPS、反向代理访问控制和更严格的 token 过期策略。
+- SQLite 适合单机轻量部署；多用户、高并发或长期生产演进建议迁移到 PostgreSQL 并引入 Alembic。
+- 部署任务为同步执行模型，适合小型服务部署；大量长任务建议接入独立任务队列和更完整的回滚策略。

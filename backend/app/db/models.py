@@ -55,9 +55,16 @@ class ServerSnapshot(Base):
     server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(30), default="skipped")
     cpu_usage: Mapped[float | None] = mapped_column(nullable=True)
+    cpu_cores: Mapped[int | None] = mapped_column(Integer, nullable=True)
     memory_usage: Mapped[float | None] = mapped_column(nullable=True)
+    memory_total_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    memory_used_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     disk_usage: Mapped[float | None] = mapped_column(nullable=True)
+    disk_total_gb: Mapped[float | None] = mapped_column(nullable=True)
+    disk_used_gb: Mapped[float | None] = mapped_column(nullable=True)
     os_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    kernel: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ip_addresses: Mapped[str | None] = mapped_column(Text, nullable=True)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -93,6 +100,77 @@ class AiModel(TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     provider: Mapped[AiProvider] = relationship(back_populates="models")
+
+
+class AppPackage(Base):
+    __tablename__ = "app_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(String(1000))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    uploaded_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    analyses: Mapped[list["ProjectAnalysis"]] = relationship(back_populates="package", cascade="all, delete-orphan")
+    deployments: Mapped[list["DeploymentTask"]] = relationship(back_populates="package")
+
+
+class ProjectAnalysis(Base):
+    __tablename__ = "project_analyses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    package_id: Mapped[int | None] = mapped_column(ForeignKey("app_packages.id", ondelete="SET NULL"), nullable=True)
+    server_id: Mapped[int | None] = mapped_column(ForeignKey("servers.id", ondelete="SET NULL"), nullable=True)
+    target_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    detected_type: Mapped[str] = mapped_column(String(80))
+    summary: Mapped[str] = mapped_column(Text)
+    dependencies_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_commands_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deploy_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_tree_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_ai_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    package: Mapped[AppPackage | None] = relationship(back_populates="analyses")
+
+
+class DeploymentTask(Base):
+    __tablename__ = "deployment_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    package_id: Mapped[int | None] = mapped_column(ForeignKey("app_packages.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    plan_json: Mapped[str] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    package: Mapped[AppPackage | None] = relationship(back_populates="deployments")
+    logs: Mapped[list["CommandLog"]] = relationship(back_populates="task", cascade="all, delete-orphan")
+
+
+class CommandLog(Base):
+    __tablename__ = "command_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("deployment_tasks.id", ondelete="CASCADE"), nullable=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    command: Mapped[str] = mapped_column(Text)
+    working_directory: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    stdout: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stderr: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    task: Mapped[DeploymentTask | None] = relationship(back_populates="logs")
 
 
 class AuditLog(Base):

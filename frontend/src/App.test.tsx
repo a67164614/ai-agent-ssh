@@ -27,7 +27,26 @@ const serverRecord = {
   connection_mode: "ssh",
   has_password: true,
   has_private_key: false,
-  last_test_message: "SSH 连接失败：认证失败。"
+  last_test_message: "SSH 连接失败：认证失败。",
+  latest_snapshot: {
+    id: 9,
+    server_id: 1,
+    status: "ok",
+    cpu_usage: 12.5,
+    cpu_cores: 4,
+    memory_usage: 25.8,
+    memory_total_mb: 7936,
+    memory_used_mb: 2048,
+    disk_usage: 37,
+    disk_total_gb: 98.3,
+    disk_used_gb: 36.4,
+    os_info: "Ubuntu 22.04.4 LTS",
+    kernel: "6.5.0-35-generic",
+    ip_addresses: "10.0.12.21",
+    message: "资源快照采集成功。",
+    created_at: "2026-07-02T08:00:00Z"
+  },
+  last_seen_at: "2026-07-02T08:00:00Z"
 };
 
 const providerRecord = {
@@ -39,7 +58,86 @@ const providerRecord = {
   api_mode: "chat_completions",
   enabled: true,
   has_api_key: true,
-  api_key_mask: "sk-t********test"
+  api_key_mask: "sk-t********test",
+  last_test_status: "ok",
+  last_test_message: "AI 中转站连接正常。"
+};
+
+const modelRecord = {
+  id: 10,
+  provider_id: 1,
+  model_id: "deepseek-chat",
+  display_name: "deepseek-chat",
+  source: "fetched",
+  enabled: true
+};
+
+const packageRecord = {
+  id: 7,
+  filename: "demo.zip",
+  size: 1024,
+  sha256: "abc123",
+  uploaded_at: "2026-07-02T08:10:00Z"
+};
+
+const plan = {
+  summary: "这是一个 Node.js 服务",
+  risk_level: "medium",
+  requires_sudo: false,
+  steps: [
+    {
+      name: "安装依赖",
+      command: "npm install",
+      working_directory: "/opt/apps/demo"
+    },
+    {
+      name: "启动服务",
+      command: "npm run start",
+      working_directory: "/opt/apps/demo"
+    }
+  ]
+};
+
+const analysisRecord = {
+  id: 3,
+  package_id: 7,
+  server_id: 1,
+  target_path: "/opt/apps/demo",
+  detected_type: "node",
+  summary: "这是一个 Node.js 服务，建议使用 pm2 或 systemd 托管。",
+  dependencies: ["Node.js", "npm"],
+  start_commands: ["npm run start"],
+  file_tree: ["package.json", "src/main.ts"],
+  plan,
+  created_at: "2026-07-02T08:20:00Z"
+};
+
+const deploymentRecord = {
+  id: 5,
+  server_id: 1,
+  package_id: 7,
+  status: "success",
+  summary: "这是一个 Node.js 服务",
+  plan,
+  error_message: null,
+  started_at: "2026-07-02T08:30:00Z",
+  finished_at: "2026-07-02T08:31:00Z",
+  created_at: "2026-07-02T08:25:00Z",
+  logs: [
+    {
+      id: 11,
+      task_id: 5,
+      server_id: 1,
+      command: "npm run start",
+      working_directory: "/opt/apps/demo",
+      stdout: "服务已启动",
+      stderr: "",
+      exit_code: 0,
+      status: "success",
+      started_at: "2026-07-02T08:30:00Z",
+      finished_at: "2026-07-02T08:31:00Z"
+    }
+  ]
 };
 
 function mockApi(routes: MockApiRoutes = {}) {
@@ -49,7 +147,9 @@ function mockApi(routes: MockApiRoutes = {}) {
       "/api/auth/status": { body: { initialized: false } },
       "/api/auth/me": { body: { detail: "请先登录。" }, ok: false, status: 401 },
       "/api/servers": { body: [] },
-      "/api/ai-providers": { body: [] }
+      "/api/ai-providers": { body: [] },
+      "/api/packages": { body: [] },
+      "/api/deployments": { body: [] }
     }[path];
 
     if (!route) {
@@ -143,6 +243,10 @@ describe("App interactions", () => {
     await waitFor(() => {
       expect(screen.getByText("prod-app-01")).toBeInTheDocument();
     });
+    expect(screen.getByText("Ubuntu 22.04.4 LTS")).toBeInTheDocument();
+    expect(screen.getByText("CPU 12.5%")).toBeInTheDocument();
+    expect(screen.getByText("内存 25.8%")).toBeInTheDocument();
+    expect(screen.getByText("磁盘 37%")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /添加服务器/ }));
     await userEvent.clear(screen.getByLabelText("服务器名称"));
@@ -219,11 +323,46 @@ describe("App interactions", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/ai-providers", expect.objectContaining({ method: "POST" }));
   });
 
-  test("switches sidebar sections", async () => {
+  test("opens terminal page with connectable websocket UI", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    const instances: Array<{
+      url: string;
+      sent: string[];
+      onopen: null | (() => void);
+      onmessage: null | ((event: { data: string }) => void);
+      onclose: null | (() => void);
+      onerror: null | (() => void);
+      send: (value: string) => void;
+      close: () => void;
+    }> = [];
+    class MockWebSocket {
+      url: string;
+      sent: string[] = [];
+      onopen: null | (() => void) = null;
+      onmessage: null | ((event: { data: string }) => void) = null;
+      onclose: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+
+      constructor(url: string) {
+        this.url = url;
+        instances.push(this);
+        setTimeout(() => this.onopen?.(), 0);
+      }
+
+      send(value: string) {
+        this.sent.push(value);
+        this.onmessage?.({ data: `已发送：${value}` });
+      }
+
+      close() {
+        this.onclose?.();
+      }
+    }
+    vi.stubGlobal("WebSocket", MockWebSocket);
     mockApi({
       "/api/auth/status": { body: { initialized: true } },
-      "/api/auth/me": { body: adminUser }
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": { body: [serverRecord] }
     });
 
     render(<App />);
@@ -231,7 +370,194 @@ describe("App interactions", () => {
     await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
 
     expect(screen.getByRole("heading", { name: "网页 SSH 终端" })).toBeInTheDocument();
-    expect(screen.getByText("真实终端代理将在 WebSocket SSH 功能完成后启用。")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "连接终端" }));
+    await waitFor(() => {
+      expect(screen.getByText("终端已连接。")).toBeInTheDocument();
+    });
+    await userEvent.type(screen.getByLabelText("终端输入"), "pwd");
+    await userEvent.click(screen.getByRole("button", { name: "发送命令" }));
+    expect(instances[0].url).toContain("/api/servers/1/terminal");
+    expect(instances[0].sent).toContain("pwd");
+  });
+
+  test("opens server detail and supports snapshot refresh, edit and delete", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": { body: [serverRecord] },
+      "/api/servers/1/snapshot": {
+        body: { ...serverRecord.latest_snapshot, cpu_usage: 18.2, message: "资源快照已刷新。" }
+      },
+      "/api/servers/1": (init) => ({
+        body: init?.method === "DELETE" ? { ok: true } : { ...serverRecord, name: "prod-app-renamed" }
+      })
+    });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "查看 prod-app-01 详情" }));
+    expect(screen.getByRole("heading", { name: "prod-app-01" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "刷新快照" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("资源快照已刷新。").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText("CPU 18.2%")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "编辑服务器" }));
+    await userEvent.clear(screen.getByLabelText("服务器名称"));
+    await userEvent.type(screen.getByLabelText("服务器名称"), "prod-app-renamed");
+    await userEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => {
+      expect(screen.getByText("服务器已更新：prod-app-renamed")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "删除服务器" }));
+    await waitFor(() => {
+      expect(screen.getByText("服务器已删除。")).toBeInTheDocument();
+    });
+  });
+
+  test("manages AI provider testing, model fetching, manual model and default model", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/ai-providers": { body: [providerRecord] },
+      "/api/ai-providers/1/test": { body: { ...providerRecord, last_test_message: "AI 中转站连接正常。" } },
+      "/api/ai-providers/1/fetch-models": { body: [modelRecord] },
+      "/api/ai-providers/1/models": (init) => ({
+        body:
+          init?.method === "POST"
+            ? { id: 12, provider_id: 1, model_id: "qwen-max", display_name: "qwen-max", source: "manual", enabled: true }
+            : [modelRecord]
+      }),
+      "/api/ai-providers/1": { body: { ...providerRecord, default_model: "qwen-max" } },
+      "/api/ai-providers/1/set-default": { body: providerRecord }
+    });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /系统设置/ }));
+    await userEvent.click(screen.getByRole("button", { name: "测试 Relay" }));
+    await waitFor(() => {
+      expect(screen.getByText("AI 中转站连接正常。")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "拉取模型" }));
+    expect(await screen.findByText("deepseek-chat · 拉取 · 已启用")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("手动模型 ID"), "qwen-max");
+    await userEvent.click(screen.getByRole("button", { name: "添加手动模型" }));
+    await waitFor(() => {
+      expect(screen.getByText("模型已添加：qwen-max")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "设为默认模型 qwen-max" }));
+    await waitFor(() => {
+      expect(screen.getByText("默认模型已切换：qwen-max")).toBeInTheDocument();
+    });
+  });
+
+  test("proposes a command, confirms execution and summarizes output", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": { body: [serverRecord] },
+      "/api/servers/1/assistant/propose-command": {
+        body: {
+          command: "uname -a && lscpu && free -h && df -h /",
+          explanation: "查询系统、CPU、内存和磁盘信息。",
+          requires_confirmation: true,
+          warnings: ["包含系统查询命令。"],
+          source: "ai"
+        }
+      },
+      "/api/servers/1/commands": {
+        body: {
+          id: 20,
+          task_id: null,
+          server_id: 1,
+          command: "uname -a && lscpu && free -h && df -h /",
+          working_directory: null,
+          stdout: "Ubuntu 22.04\nCPU(s): 4\nMem: 7.8Gi\n/dev/sda1 37%",
+          stderr: "",
+          exit_code: 0,
+          status: "success",
+          started_at: "2026-07-02T08:40:00Z",
+          finished_at: "2026-07-02T08:40:01Z"
+        }
+      },
+      "/api/servers/1/assistant/summarize-output": {
+        body: {
+          status: "成功",
+          summary: "命令执行成功，服务器为 Ubuntu 22.04，CPU 4 核，根分区使用率 37%。"
+        }
+      }
+    });
+
+    render(<App />);
+
+    const navigation = await screen.findByRole("navigation", { name: "主导航" });
+    await userEvent.click(within(navigation).getByRole("button", { name: /AI 助手/ }));
+    await userEvent.clear(screen.getByLabelText("运维问题"));
+    await userEvent.type(screen.getByLabelText("运维问题"), "查询当前服务器配置");
+    await userEvent.click(screen.getByRole("button", { name: "生成命令建议" }));
+
+    expect(await screen.findByText("建议命令")).toBeInTheDocument();
+    expect(screen.getByText("uname -a && lscpu && free -h && df -h /")).toBeInTheDocument();
+    expect(screen.getByText("查询系统、CPU、内存和磁盘信息。")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "确认执行" }));
+    await waitFor(() => {
+      expect(screen.getByText("命令执行完成。")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/Ubuntu 22.04/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/CPU 4 核/)).toBeInTheDocument();
+  });
+
+  test("uploads package, analyzes project, creates plan, executes deployment and shows history", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": { body: [serverRecord] },
+      "/api/packages/upload": { body: packageRecord },
+      "/api/servers/1/analyze-upload": { body: analysisRecord },
+      "/api/deployments/plan": { body: { ...deploymentRecord, status: "pending", logs: [] } },
+      "/api/deployments/5/execute": { body: deploymentRecord },
+      "/api/deployments": { body: [deploymentRecord] }
+    });
+
+    render(<App />);
+
+    const navigation = await screen.findByRole("navigation", { name: "主导航" });
+    await userEvent.click(within(navigation).getByRole("button", { name: /服务部署/ }));
+    await userEvent.upload(screen.getByLabelText("服务包"), new File(["demo"], "demo.zip", { type: "application/zip" }));
+    await userEvent.clear(screen.getByLabelText("部署目录"));
+    await userEvent.type(screen.getByLabelText("部署目录"), "/opt/apps/demo");
+    await userEvent.click(screen.getByRole("button", { name: "上传服务包" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("服务包已上传：demo.zip")).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "分析上传包" }));
+    expect(await screen.findByText("这是一个 Node.js 服务，建议使用 pm2 或 systemd 托管。")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "创建部署计划" }));
+    await waitFor(() => {
+      expect(screen.getByText("部署计划已创建，请确认后执行。")).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "确认执行部署" }));
+    await waitFor(() => {
+      expect(screen.getByText("部署执行完成：success")).toBeInTheDocument();
+    });
+
+    await userEvent.click(within(navigation).getByRole("button", { name: /历史记录/ }));
+    expect(await screen.findByText("npm run start")).toBeInTheDocument();
+    expect(screen.getByText("服务已启动")).toBeInTheDocument();
   });
 
   test("checks backend health through the API", async () => {

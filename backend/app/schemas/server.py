@@ -43,6 +43,7 @@ class ServerResponse(BaseModel):
     has_private_key: bool
     last_seen_at: datetime | None = None
     last_test_message: str | None = None
+    latest_snapshot: "ServerSnapshotResponse | None" = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -52,8 +53,15 @@ class ServerSnapshotResponse(BaseModel):
     server_id: int
     status: str
     cpu_usage: float | None
+    cpu_cores: int | None = None
     memory_usage: float | None
+    memory_total_mb: int | None = None
+    memory_used_mb: int | None = None
     disk_usage: float | None
+    disk_total_gb: float | None = None
+    disk_used_gb: float | None = None
     os_info: str | None
+    kernel: str | None = None
+    ip_addresses: str | None = None
     message: str | None
     created_at: datetime | None = None

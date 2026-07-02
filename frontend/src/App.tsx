@@ -39,6 +39,25 @@ type AuthStatus = {
   initialized: boolean;
 };
 
+type ServerSnapshot = {
+  id: number;
+  server_id: number;
+  status: string;
+  cpu_usage: number | null;
+  cpu_cores?: number | null;
+  memory_usage: number | null;
+  memory_total_mb?: number | null;
+  memory_used_mb?: number | null;
+  disk_usage: number | null;
+  disk_total_gb?: number | null;
+  disk_used_gb?: number | null;
+  os_info: string | null;
+  kernel?: string | null;
+  ip_addresses?: string | null;
+  message: string | null;
+  created_at?: string | null;
+};
+
 type ServerRecord = {
   id: number;
   name: string;
@@ -52,6 +71,8 @@ type ServerRecord = {
   has_password: boolean;
   has_private_key: boolean;
   last_test_message?: string | null;
+  last_seen_at?: string | null;
+  latest_snapshot?: ServerSnapshot | null;
 };
 
 const serverStatusLabels: Record<string, string> = {
@@ -59,7 +80,9 @@ const serverStatusLabels: Record<string, string> = {
   offline: "离线",
   unknown: "未检测",
   unchecked: "未检测",
-  skipped: "未启用"
+  skipped: "未启用",
+  failed: "失败",
+  ok: "正常"
 };
 
 type AiProvider = {
@@ -74,6 +97,15 @@ type AiProvider = {
   api_key_mask: string;
   last_test_status?: string | null;
   last_test_message?: string | null;
+};
+
+type AiModel = {
+  id: number;
+  provider_id: number;
+  model_id: string;
+  display_name: string | null;
+  source: string;
+  enabled: boolean;
 };
 
 type ServerForm = {
@@ -92,15 +124,82 @@ type ProviderForm = {
   default_model: string;
 };
 
-const tokenKey = "ai-agent-ssh-token";
+type CommandLog = {
+  id: number;
+  task_id: number | null;
+  server_id: number;
+  command: string;
+  working_directory: string | null;
+  stdout: string | null;
+  stderr: string | null;
+  exit_code: number | null;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
 
-const deploymentSteps = [
-  "上传并解压服务包到 /opt/apps/demo",
-  "识别 package.json 并安装依赖",
-  "执行 npm run build",
-  "生成 systemd 服务草案",
-  "等待管理员确认后启动服务"
-];
+type DeploymentPlan = {
+  summary: string;
+  risk_level: string;
+  requires_sudo: boolean;
+  steps: Array<{ name: string; command: string; working_directory: string }>;
+};
+
+type PackageRecord = {
+  id: number;
+  filename: string;
+  size: number;
+  sha256: string;
+  uploaded_at: string | null;
+};
+
+type ProjectAnalysis = {
+  id: number;
+  package_id: number | null;
+  server_id: number | null;
+  target_path: string | null;
+  detected_type: string;
+  summary: string;
+  dependencies: string[];
+  start_commands: string[];
+  file_tree: string[];
+  plan: DeploymentPlan;
+  created_at: string | null;
+};
+
+type DeploymentTask = {
+  id: number;
+  server_id: number;
+  package_id: number | null;
+  status: string;
+  summary: string | null;
+  plan: DeploymentPlan;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  logs: CommandLog[];
+};
+
+type AssistantState = {
+  question: string;
+  suggestedCommand: string;
+  explanation: string;
+  warnings: string[];
+  source: string;
+  output: string;
+  summary: string;
+};
+
+type DeployState = {
+  targetPath: string;
+  packageFile: File | null;
+  packageRecord: PackageRecord | null;
+  analysis: ProjectAnalysis | null;
+  task: DeploymentTask | null;
+};
+
+const tokenKey = "ai-agent-ssh-token";
 
 const sections: Array<{ id: SectionId; label: string; icon: React.ReactNode }> = [
   { id: "overview", label: "概览", icon: <Activity size={18} /> },
@@ -111,21 +210,13 @@ const sections: Array<{ id: SectionId; label: string; icon: React.ReactNode }> =
   { id: "settings", label: "系统设置", icon: <Settings size={18} /> }
 ];
 
-const samplePlan = {
+const samplePlan: DeploymentPlan = {
   summary: "部署 Node.js 示例服务",
   risk_level: "medium",
   requires_sudo: false,
   steps: [
-    {
-      name: "安装依赖",
-      command: "npm install",
-      working_directory: "/opt/apps/demo"
-    },
-    {
-      name: "构建服务",
-      command: "npm run build",
-      working_directory: "/opt/apps/demo"
-    }
+    { name: "安装依赖", command: "npm install", working_directory: "/opt/apps/demo" },
+    { name: "构建服务", command: "npm run build", working_directory: "/opt/apps/demo" }
   ]
 };
 
@@ -145,6 +236,16 @@ const emptyProviderForm: ProviderForm = {
   default_model: ""
 };
 
+const defaultAssistantState: AssistantState = {
+  question: "查询当前服务器配置",
+  suggestedCommand: "",
+  explanation: "",
+  warnings: [],
+  source: "",
+  output: "",
+  summary: ""
+};
+
 export function App() {
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [notice, setNotice] = useState<Notice>({ tone: "neutral", message: "等待操作。" });
@@ -157,14 +258,29 @@ export function App() {
   const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [servers, setServers] = useState<ServerRecord[]>([]);
   const [providers, setProviders] = useState<AiProvider[]>([]);
+  const [modelsByProvider, setModelsByProvider] = useState<Record<number, AiModel[]>>({});
+  const [packages, setPackages] = useState<PackageRecord[]>([]);
+  const [deployments, setDeployments] = useState<DeploymentTask[]>([]);
   const [showServerForm, setShowServerForm] = useState(false);
+  const [editingServer, setEditingServer] = useState<ServerRecord | null>(null);
+  const [selectedServer, setSelectedServer] = useState<ServerRecord | null>(null);
   const [serverForm, setServerForm] = useState<ServerForm>(emptyServerForm);
   const [providerForm, setProviderForm] = useState<ProviderForm>(emptyProviderForm);
+  const [manualModelId, setManualModelId] = useState("");
+  const [assistantState, setAssistantState] = useState<AssistantState>(defaultAssistantState);
+  const [deployState, setDeployState] = useState<DeployState>({
+    targetPath: "/opt/apps/demo",
+    packageFile: null,
+    packageRecord: null,
+    analysis: null,
+    task: null
+  });
 
   const currentTitle = useMemo(
     () => sections.find((section) => section.id === activeSection)?.label ?? "概览",
     [activeSection]
   );
+  const activeServer = selectedServer ?? servers[0] ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -214,12 +330,16 @@ export function App() {
   }, []);
 
   async function loadResources(activeToken: string) {
-    const [serverItems, providerItems] = await Promise.all([
+    const [serverItems, providerItems, packageItems, deploymentItems] = await Promise.all([
       apiRequest<ServerRecord[]>("/servers", { token: activeToken }),
-      apiRequest<AiProvider[]>("/ai-providers", { token: activeToken })
+      apiRequest<AiProvider[]>("/ai-providers", { token: activeToken }),
+      apiRequest<PackageRecord[]>("/packages", { token: activeToken }).catch(() => []),
+      apiRequest<DeploymentTask[]>("/deployments", { token: activeToken }).catch(() => [])
     ]);
     setServers(serverItems);
     setProviders(providerItems);
+    setPackages(packageItems);
+    setDeployments(deploymentItems);
   }
 
   async function submitAuth(mode: "init" | "login") {
@@ -301,25 +421,28 @@ export function App() {
 
   async function saveServer() {
     setIsLoading(true);
-    setNotice({ tone: "neutral", message: "正在保存服务器..." });
+    setNotice({ tone: "neutral", message: editingServer ? "正在更新服务器..." : "正在保存服务器..." });
     try {
-      const saved = await apiRequest<ServerRecord>("/servers", {
-        method: "POST",
+      const payload = {
+        name: serverForm.name,
+        host: serverForm.host,
+        port: Number(serverForm.port || 22),
+        username: serverForm.username,
+        auth_type: "password",
+        password: serverForm.password,
+        remark: serverForm.remark || null
+      };
+      const saved = await apiRequest<ServerRecord>(editingServer ? `/servers/${editingServer.id}` : "/servers", {
+        method: editingServer ? "PUT" : "POST",
         token,
-        body: {
-          name: serverForm.name,
-          host: serverForm.host,
-          port: Number(serverForm.port || 22),
-          username: serverForm.username,
-          auth_type: "password",
-          password: serverForm.password,
-          remark: serverForm.remark || null
-        }
+        body: payload
       });
-      setServers((items) => [...items, saved]);
+      setServers((items) => (editingServer ? items.map((item) => (item.id === saved.id ? saved : item)) : [...items, saved]));
+      setSelectedServer((current) => (current?.id === saved.id ? saved : current));
       setServerForm(emptyServerForm);
+      setEditingServer(null);
       setShowServerForm(false);
-      setNotice({ tone: "success", message: `服务器已保存：${saved.name}` });
+      setNotice({ tone: "success", message: editingServer ? `服务器已更新：${saved.name}` : `服务器已保存：${saved.name}` });
     } catch (error) {
       setNotice({ tone: "danger", message: `服务器保存失败：${formatError(error)}` });
     } finally {
@@ -332,7 +455,7 @@ export function App() {
     setNotice({ tone: "neutral", message: `正在检查 ${server.name}...` });
     try {
       const updated = await apiRequest<ServerRecord>(`/servers/${server.id}/test`, { method: "POST", token });
-      setServers((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+      updateServerInState(updated);
       const fallback = `服务器状态：${formatServerStatus(updated.status)}`;
       setNotice({
         tone: updated.status === "online" ? "success" : "danger",
@@ -346,6 +469,47 @@ export function App() {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function refreshSnapshot(server: ServerRecord) {
+    setIsLoading(true);
+    try {
+      const snapshot = await apiRequest<ServerSnapshot>(`/servers/${server.id}/snapshot`, { method: "POST", token });
+      const updated = { ...server, latest_snapshot: snapshot, status: snapshot.status === "ok" ? "online" : server.status };
+      updateServerInState(updated);
+      setNotice({ tone: snapshot.status === "ok" ? "success" : "danger", message: snapshot.message ?? "资源快照已刷新。" });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `资源快照刷新失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function deleteServer(server: ServerRecord) {
+    setIsLoading(true);
+    try {
+      await apiRequest<{ ok: boolean }>(`/servers/${server.id}`, { method: "DELETE", token });
+      setServers((items) => items.filter((item) => item.id !== server.id));
+      setSelectedServer(null);
+      setNotice({ tone: "success", message: "服务器已删除。" });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `服务器删除失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function editServer(server: ServerRecord) {
+    setEditingServer(server);
+    setServerForm({
+      name: server.name,
+      host: server.host,
+      port: String(server.port),
+      username: server.username,
+      password: "",
+      remark: server.remark ?? ""
+    });
+    setShowServerForm(true);
   }
 
   async function saveProvider() {
@@ -378,12 +542,230 @@ export function App() {
     try {
       const updated = await apiRequest<AiProvider>(`/ai-providers/${provider.id}/test`, { method: "POST", token });
       setProviders((items) => items.map((item) => (item.id === updated.id ? updated : item)));
-      setNotice({ tone: "success", message: updated.last_test_message ?? `AI 中转站状态：${formatProviderStatus(updated.last_test_status)}` });
+      setNotice({ tone: updated.last_test_status === "failed" ? "danger" : "success", message: updated.last_test_message ?? `AI 中转站状态：${formatProviderStatus(updated.last_test_status)}` });
     } catch (error) {
       setNotice({ tone: "danger", message: `AI 中转站检查失败：${formatError(error)}` });
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function fetchModels(provider: AiProvider) {
+    setIsLoading(true);
+    try {
+      const models = await apiRequest<AiModel[]>(`/ai-providers/${provider.id}/fetch-models`, { method: "POST", token });
+      setModelsByProvider((items) => ({ ...items, [provider.id]: models }));
+      setNotice({ tone: "success", message: `模型列表拉取成功，共 ${models.length} 个模型。` });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `模型拉取失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function addManualModel(provider: AiProvider) {
+    if (!manualModelId.trim()) return;
+    setIsLoading(true);
+    try {
+      const model = await apiRequest<AiModel[]>(`/ai-providers/${provider.id}/models`, { method: "GET", token }).then(async () =>
+        apiRequest<AiModel>(`/ai-providers/${provider.id}/models`, {
+          method: "POST",
+          token,
+          body: { model_id: manualModelId.trim(), display_name: manualModelId.trim(), enabled: true }
+        })
+      );
+      setModelsByProvider((items) => ({ ...items, [provider.id]: [...(items[provider.id] ?? []), model] }));
+      setNotice({ tone: "success", message: `模型已添加：${model.model_id}` });
+      setManualModelId("");
+    } catch (error) {
+      setNotice({ tone: "danger", message: `模型添加失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function setDefaultModel(provider: AiProvider, model: AiModel) {
+    setIsLoading(true);
+    try {
+      const updated = await apiRequest<AiProvider>(`/ai-providers/${provider.id}`, {
+        method: "PUT",
+        token,
+        body: {
+          name: provider.name,
+          base_url: provider.base_url,
+          api_key: "",
+          default_model: model.model_id,
+          enabled: provider.enabled
+        }
+      });
+      await apiRequest<AiProvider>(`/ai-providers/${provider.id}/set-default`, { method: "POST", token }).catch(() => updated);
+      setProviders((items) => items.map((item) => (item.id === provider.id ? updated : item)));
+      setNotice({ tone: "success", message: `默认模型已切换：${model.model_id}` });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `默认模型切换失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function proposeCommand() {
+    if (!activeServer) {
+      setNotice({ tone: "danger", message: "请先选择服务器。" });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const proposal = await apiRequest<{
+        command: string;
+        explanation: string;
+        requires_confirmation: boolean;
+        warnings: string[];
+        source: string;
+      }>(`/servers/${activeServer.id}/assistant/propose-command`, {
+        method: "POST",
+        token,
+        body: {
+          question: assistantState.question,
+          current_directory: deployState.targetPath,
+          recent_output: assistantState.output || null
+        }
+      });
+      setCommand(proposal.command);
+      setAssistantState((state) => ({
+        ...state,
+        suggestedCommand: proposal.command,
+        explanation: proposal.explanation,
+        warnings: proposal.warnings,
+        source: proposal.source,
+        output: "",
+        summary: ""
+      }));
+      setNotice({ tone: "success", message: "已生成命令建议，请确认后执行。" });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `命令建议生成失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function executeSuggestedCommand() {
+    if (!activeServer || !assistantState.suggestedCommand) return;
+    setIsLoading(true);
+    try {
+      const log = await apiRequest<CommandLog>(`/servers/${activeServer.id}/commands`, {
+        method: "POST",
+        token,
+        body: { command: assistantState.suggestedCommand, working_directory: null }
+      });
+      const output = [log.stdout, log.stderr].filter(Boolean).join("\n");
+      const summary = await apiRequest<{ status: string; summary: string }>(`/servers/${activeServer.id}/assistant/summarize-output`, {
+        method: "POST",
+        token,
+        body: {
+          command: log.command,
+          stdout: log.stdout,
+          stderr: log.stderr,
+          exit_code: log.exit_code
+        }
+      }).catch(() => ({
+        status: log.status === "success" ? "成功" : "失败",
+        summary: log.status === "success" ? "命令执行成功，已返回服务器输出。" : "命令执行失败，请查看输出。"
+      }));
+      setAssistantState((state) => ({
+        ...state,
+        output,
+        summary: summary.summary
+      }));
+      setNotice({ tone: log.status === "success" ? "success" : "danger", message: "命令执行完成。" });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `命令执行失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function uploadPackage() {
+    if (!deployState.packageFile) {
+      setNotice({ tone: "danger", message: "请先选择服务包。" });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", deployState.packageFile);
+      const uploaded = await apiRequest<PackageRecord>("/packages/upload", { method: "POST", token, body: formData });
+      setPackages((items) => [uploaded, ...items]);
+      setDeployState((state) => ({ ...state, packageRecord: uploaded }));
+      setNotice({ tone: "success", message: `服务包已上传：${uploaded.filename}` });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `服务包上传失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function analyzePackage() {
+    if (!activeServer || !deployState.packageRecord) return;
+    setIsLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("package_id", String(deployState.packageRecord.id));
+      formData.append("target_path", deployState.targetPath);
+      const analysis = await apiRequest<ProjectAnalysis>(`/servers/${activeServer.id}/analyze-upload`, {
+        method: "POST",
+        token,
+        body: formData
+      });
+      setDeployState((state) => ({ ...state, analysis }));
+      setNotice({ tone: "success", message: "服务包分析完成。" });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `服务包分析失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function createDeploymentPlan() {
+    if (!activeServer || !deployState.analysis) return;
+    setIsLoading(true);
+    try {
+      const task = await apiRequest<DeploymentTask>("/deployments/plan", {
+        method: "POST",
+        token,
+        body: {
+          server_id: activeServer.id,
+          package_id: deployState.packageRecord?.id ?? null,
+          plan: deployState.analysis.plan
+        }
+      });
+      setDeployState((state) => ({ ...state, task }));
+      setDeployments((items) => [task, ...items.filter((item) => item.id !== task.id)]);
+      setNotice({ tone: "success", message: "部署计划已创建，请确认后执行。" });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `部署计划创建失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function executeDeployment() {
+    if (!deployState.task) return;
+    setIsLoading(true);
+    try {
+      const task = await apiRequest<DeploymentTask>(`/deployments/${deployState.task.id}/execute`, { method: "POST", token });
+      setDeployState((state) => ({ ...state, task }));
+      setDeployments((items) => [task, ...items.filter((item) => item.id !== task.id)]);
+      setNotice({ tone: task.status === "success" ? "success" : "danger", message: `部署执行完成：${task.status}` });
+    } catch (error) {
+      setNotice({ tone: "danger", message: `部署执行失败：${formatError(error)}` });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function updateServerInState(updated: ServerRecord) {
+    setServers((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+    setSelectedServer((current) => (current?.id === updated.id ? updated : current));
   }
 
   if (!user) {
@@ -404,11 +786,7 @@ export function App() {
             </label>
             <label>
               密码
-              <input
-                type="password"
-                value={authForm.password}
-                onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
-              />
+              <input type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} />
             </label>
           </div>
           <div className="button-row">
@@ -441,12 +819,7 @@ export function App() {
         </div>
         <nav className="nav-list" aria-label="主导航">
           {sections.map((section) => (
-            <button
-              className={activeSection === section.id ? "active" : ""}
-              key={section.id}
-              onClick={() => setActiveSection(section.id)}
-              type="button"
-            >
+            <button className={activeSection === section.id ? "active" : ""} key={section.id} onClick={() => setActiveSection(section.id)} type="button">
               {section.icon}
               {section.label}
             </button>
@@ -460,7 +833,7 @@ export function App() {
             <h1>{currentTitle}</h1>
             <p>通过 SSH 管理多台服务器，AI 只生成计划，执行前必须确认。</p>
           </div>
-          <button className="primary-action" onClick={() => setShowServerForm(true)} type="button">
+          <button className="primary-action" onClick={() => { setEditingServer(null); setServerForm(emptyServerForm); setShowServerForm(true); }} type="button">
             <Server size={18} />添加服务器
           </button>
         </header>
@@ -471,10 +844,12 @@ export function App() {
 
         {showServerForm && (
           <ServerFormPanel
+            title={editingServer ? "编辑服务器" : "添加服务器"}
             form={serverForm}
             isLoading={isLoading}
+            saveLabel={editingServer ? "保存修改" : "保存服务器"}
             onChange={setServerForm}
-            onCancel={() => setShowServerForm(false)}
+            onCancel={() => { setShowServerForm(false); setEditingServer(null); }}
             onSave={saveServer}
           />
         )}
@@ -484,25 +859,56 @@ export function App() {
             isLoading={isLoading}
             providers={providers}
             servers={servers}
+            selectedServer={selectedServer}
             onCheckHealth={checkHealth}
             onTestServer={testServer}
             onTestProvider={testProvider}
+            onSelectServer={setSelectedServer}
+            onRefreshSnapshot={refreshSnapshot}
+            onEditServer={editServer}
+            onDeleteServer={deleteServer}
           />
         )}
-        {activeSection === "terminal" && <TerminalSection />}
+        {activeSection === "terminal" && <TerminalSection server={activeServer} token={token} />}
         {activeSection === "assistant" && (
-          <AssistantSection command={command} isLoading={isLoading} onChangeCommand={setCommand} onCheckCommand={checkCommand} />
+          <AssistantSection
+            state={assistantState}
+            command={command}
+            isLoading={isLoading}
+            onChangeState={setAssistantState}
+            onChangeCommand={setCommand}
+            onCheckCommand={checkCommand}
+            onProposeCommand={proposeCommand}
+            onExecuteCommand={executeSuggestedCommand}
+          />
         )}
-        {activeSection === "deploy" && <DeploySection isLoading={isLoading} onValidatePlan={validatePlan} />}
-        {activeSection === "history" && <HistorySection />}
+        {activeSection === "deploy" && (
+          <DeploySection
+            state={deployState}
+            isLoading={isLoading}
+            onChangeState={setDeployState}
+            onValidatePlan={validatePlan}
+            onUploadPackage={uploadPackage}
+            onAnalyzePackage={analyzePackage}
+            onCreatePlan={createDeploymentPlan}
+            onExecuteDeployment={executeDeployment}
+          />
+        )}
+        {activeSection === "history" && <HistorySection deployments={deployments} packages={packages} />}
         {activeSection === "settings" && (
           <SettingsSection
             form={providerForm}
             isLoading={isLoading}
             providers={providers}
+            modelsByProvider={modelsByProvider}
+            manualModelId={manualModelId}
             onChange={setProviderForm}
+            onChangeManualModelId={setManualModelId}
             onSave={saveProvider}
             onTestProvider={testProvider}
+            onFetchModels={fetchModels}
+            onAddManualModel={addManualModel}
+            onSetDefaultModel={setDefaultModel}
           />
         )}
       </main>
@@ -514,16 +920,26 @@ function OverviewSection({
   isLoading,
   providers,
   servers,
+  selectedServer,
   onCheckHealth,
   onTestServer,
-  onTestProvider
+  onTestProvider,
+  onSelectServer,
+  onRefreshSnapshot,
+  onEditServer,
+  onDeleteServer
 }: {
   isLoading: boolean;
   providers: AiProvider[];
   servers: ServerRecord[];
+  selectedServer: ServerRecord | null;
   onCheckHealth: () => void;
   onTestServer: (server: ServerRecord) => void;
   onTestProvider: (provider: AiProvider) => void;
+  onSelectServer: (server: ServerRecord) => void;
+  onRefreshSnapshot: (server: ServerRecord) => void;
+  onEditServer: (server: ServerRecord) => void;
+  onDeleteServer: (server: ServerRecord) => void;
 }) {
   const defaultProvider = providers.find((provider) => provider.enabled) ?? providers[0];
   return (
@@ -532,7 +948,7 @@ function OverviewSection({
         <Metric icon={<Server />} label="服务器" value={String(servers.length)} detail={`${servers.filter((item) => item.status === "online").length} 台在线`} />
         <Metric icon={<Bot />} label="默认模型" value={defaultProvider?.default_model ?? "-"} detail={defaultProvider?.name ?? "未配置"} />
         <Metric icon={<ShieldAlert />} label="安全策略" value="启用" detail="危险命令拦截" />
-        <Metric icon={<Database />} label="数据库" value="SQLite" detail="可迁移 PostgreSQL" />
+        <Metric icon={<Database />} label="数据库" value="SQLite" detail="任务和审计可追踪" />
       </section>
 
       <section className="content-grid">
@@ -540,30 +956,44 @@ function OverviewSection({
           <div className="panel-header">
             <div>
               <h2>服务器列表</h2>
-              <p>状态和资源快照由后端服务器接口维护。</p>
+              <p>展示真实连接状态和最近一次资源快照。</p>
             </div>
             <button className="ghost-action" onClick={onCheckHealth} type="button" disabled={isLoading}>
               检查后端
             </button>
           </div>
-          <ServerTable servers={servers} isLoading={isLoading} onTestServer={onTestServer} />
+          <ServerTable servers={servers} isLoading={isLoading} onTestServer={onTestServer} onSelectServer={onSelectServer} />
         </div>
 
         <AiProviderPanel providers={providers} isLoading={isLoading} onTestProvider={onTestProvider} />
       </section>
+
+      {selectedServer && (
+        <ServerDetailPanel
+          server={selectedServer}
+          isLoading={isLoading}
+          onRefreshSnapshot={onRefreshSnapshot}
+          onEditServer={onEditServer}
+          onDeleteServer={onDeleteServer}
+        />
+      )}
     </>
   );
 }
 
 function ServerFormPanel({
+  title,
   form,
   isLoading,
+  saveLabel,
   onCancel,
   onChange,
   onSave
 }: {
+  title: string;
   form: ServerForm;
   isLoading: boolean;
+  saveLabel: string;
   onCancel: () => void;
   onChange: (form: ServerForm) => void;
   onSave: () => void;
@@ -571,61 +1001,68 @@ function ServerFormPanel({
   return (
     <section className="panel">
       <div className="panel-header compact">
-        <h2>添加服务器</h2>
+        <h2>{title}</h2>
         <Server size={18} />
       </div>
       <div className="form-grid">
-        <label>
-          服务器名称
-          <input value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} />
-        </label>
-        <label>
-          主机地址
-          <input value={form.host} onChange={(event) => onChange({ ...form, host: event.target.value })} />
-        </label>
-        <label>
-          SSH 端口
-          <input value={form.port} onChange={(event) => onChange({ ...form, port: event.target.value })} />
-        </label>
-        <label>
-          SSH 用户
-          <input value={form.username} onChange={(event) => onChange({ ...form, username: event.target.value })} />
-        </label>
-        <label>
-          SSH 密码
-          <input type="password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} />
-        </label>
-        <label>
-          备注
-          <input value={form.remark} onChange={(event) => onChange({ ...form, remark: event.target.value })} />
-        </label>
+        <label>服务器名称<input value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} /></label>
+        <label>主机地址<input value={form.host} onChange={(event) => onChange({ ...form, host: event.target.value })} /></label>
+        <label>SSH 端口<input value={form.port} onChange={(event) => onChange({ ...form, port: event.target.value })} /></label>
+        <label>SSH 用户<input value={form.username} onChange={(event) => onChange({ ...form, username: event.target.value })} /></label>
+        <label>SSH 密码<input type="password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} /></label>
+        <label>备注<input value={form.remark} onChange={(event) => onChange({ ...form, remark: event.target.value })} /></label>
       </div>
       <div className="button-row">
-        <button className="primary-action" onClick={onSave} type="button" disabled={isLoading}>
-          保存服务器
-        </button>
-        <button className="ghost-action" onClick={onCancel} type="button">
-          取消
-        </button>
+        <button className="primary-action" onClick={onSave} type="button" disabled={isLoading}>{saveLabel}</button>
+        <button className="ghost-action" onClick={onCancel} type="button">取消</button>
       </div>
     </section>
   );
 }
 
-function TerminalSection() {
+function TerminalSection({ server, token }: { server: ServerRecord | null; token: string }) {
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [input, setInput] = useState("");
+  const [lines, setLines] = useState<string[]>(["请选择服务器并连接终端。"]);
+
+  function connect() {
+    if (!server) {
+      setLines((items) => [...items, "没有可连接的服务器。"]);
+      return;
+    }
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${protocol}://${window.location.host}/api/servers/${server.id}/terminal?token=${encodeURIComponent(token)}`);
+    ws.onopen = () => setLines((items) => [...items, "终端已连接。"]);
+    ws.onmessage = (event) => setLines((items) => [...items, String(event.data)]);
+    ws.onerror = () => setLines((items) => [...items, "终端连接失败。"]);
+    ws.onclose = () => setLines((items) => [...items, "终端已断开。"]);
+    setSocket(ws);
+  }
+
+  function send() {
+    if (!socket || !input.trim()) return;
+    socket.send(input);
+    setInput("");
+  }
+
   return (
     <section className="content-grid single">
       <div className="panel terminal-panel">
         <div className="panel-header compact">
           <div>
             <h2>网页 SSH 终端</h2>
-            <p>真实终端代理将在 WebSocket SSH 功能完成后启用。</p>
+            <p>{server ? `当前服务器：${server.name}` : "请先添加服务器。"}</p>
           </div>
           <TerminalSquare size={18} />
         </div>
-        <div className="terminal">
-          <span>$ systemctl status demo.service</span>
-          <span>状态：等待 WebSocket SSH 终端接入</span>
+        <div className="button-row">
+          <button className="primary-action" type="button" onClick={connect}>连接终端</button>
+          <button className="ghost-action" type="button" onClick={() => socket?.close()}>断开连接</button>
+        </div>
+        <div className="terminal">{lines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>)}</div>
+        <div className="form-grid one-line">
+          <label>终端输入<input value={input} onChange={(event) => setInput(event.target.value)} /></label>
+          <button className="secondary-action" type="button" onClick={send}>发送命令</button>
         </div>
       </div>
     </section>
@@ -633,90 +1070,145 @@ function TerminalSection() {
 }
 
 function AssistantSection({
+  state,
   command,
   isLoading,
+  onChangeState,
   onChangeCommand,
-  onCheckCommand
+  onCheckCommand,
+  onProposeCommand,
+  onExecuteCommand
 }: {
+  state: AssistantState;
   command: string;
   isLoading: boolean;
+  onChangeState: (state: AssistantState) => void;
   onChangeCommand: (value: string) => void;
   onCheckCommand: () => void;
+  onProposeCommand: () => void;
+  onExecuteCommand: () => void;
 }) {
   return (
     <section className="content-grid single">
       <div className="panel">
         <div className="panel-header compact">
           <div>
-            <h2>AI 命令安全检查</h2>
-            <p>当前先接入后端危险命令检测，后续再接 AI 生成命令。</p>
+            <h2>AI 运维助手</h2>
+            <p>AI 只生成建议，命令执行前必须确认。</p>
           </div>
           <Bot size={18} />
         </div>
         <div className="settings-list">
-          <label>
-            待检查命令
-            <input value={command} onChange={(event) => onChangeCommand(event.target.value)} />
-          </label>
+          <label>运维问题<input value={state.question} onChange={(event) => onChangeState({ ...state, question: event.target.value })} /></label>
+          <label>待检查命令<input value={command} onChange={(event) => onChangeCommand(event.target.value)} /></label>
         </div>
-        <button className="secondary-action" onClick={onCheckCommand} type="button" disabled={isLoading}>
-          <ShieldAlert size={18} />检查命令
-        </button>
+        <div className="button-row">
+          <button className="primary-action" onClick={onProposeCommand} type="button" disabled={isLoading}>生成命令建议</button>
+          <button className="ghost-action" onClick={onCheckCommand} type="button" disabled={isLoading}><ShieldAlert size={18} />检查命令</button>
+        </div>
+        {state.suggestedCommand && (
+          <div className="result-box">
+            <strong>建议命令</strong>
+            <code>{state.suggestedCommand}</code>
+            {state.explanation && <span>{state.explanation}</span>}
+            {state.warnings.map((warning) => <small key={warning}>{warning}</small>)}
+            {state.source && <small>来源：{state.source === "ai" ? "AI 中转站" : "内置安全规则"}</small>}
+            <button className="secondary-action" onClick={onExecuteCommand} type="button" disabled={isLoading}>确认执行</button>
+          </div>
+        )}
+        {state.output && <pre className="output-box">{state.output}</pre>}
+        {state.summary && <div className="risk-box"><CheckCircle2 size={18} /><span>{state.summary}</span></div>}
       </div>
     </section>
   );
 }
 
-function DeploySection({ isLoading, onValidatePlan }: { isLoading: boolean; onValidatePlan: () => void }) {
+function DeploySection({
+  state,
+  isLoading,
+  onChangeState,
+  onValidatePlan,
+  onUploadPackage,
+  onAnalyzePackage,
+  onCreatePlan,
+  onExecuteDeployment
+}: {
+  state: DeployState;
+  isLoading: boolean;
+  onChangeState: (state: DeployState) => void;
+  onValidatePlan: () => void;
+  onUploadPackage: () => void;
+  onAnalyzePackage: () => void;
+  onCreatePlan: () => void;
+  onExecuteDeployment: () => void;
+}) {
   return (
     <section className="content-grid lower">
       <div className="panel">
-        <div className="panel-header compact">
-          <h2>部署计划确认</h2>
-          <Play size={18} />
+        <div className="panel-header compact"><h2>服务部署</h2><Play size={18} /></div>
+        <div className="form-grid">
+          <label>服务包<input type="file" onChange={(event) => onChangeState({ ...state, packageFile: event.target.files?.[0] ?? null })} /></label>
+          <label>部署目录<input value={state.targetPath} onChange={(event) => onChangeState({ ...state, targetPath: event.target.value })} /></label>
         </div>
-        <ol className="step-list">
-          {deploymentSteps.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-        <div className="risk-box">
-          <ShieldAlert size={18} />
-          <span>涉及 sudo、覆盖文件或安装依赖时，后端会标记风险并要求确认。</span>
+        <div className="button-row">
+          <button className="primary-action" type="button" onClick={onUploadPackage} disabled={isLoading}>上传服务包</button>
+          <button className="ghost-action" type="button" onClick={onAnalyzePackage} disabled={isLoading || !state.packageRecord}>分析上传包</button>
+          <button className="ghost-action" type="button" onClick={onValidatePlan} disabled={isLoading}>校验部署计划</button>
         </div>
-        <button className="secondary-action spaced" onClick={onValidatePlan} type="button" disabled={isLoading}>
-          <CheckCircle2 size={18} />校验部署计划
-        </button>
+        {state.packageRecord && <p>服务包：{state.packageRecord.filename}</p>}
+        {state.analysis && (
+          <div className="result-box">
+            <strong>{state.analysis.summary}</strong>
+            <span>依赖：{state.analysis.dependencies.join("、") || "未识别"}</span>
+            <ol className="step-list">{state.analysis.plan.steps.map((step) => <li key={step.command}>{step.name}：{step.command}</li>)}</ol>
+            <button className="secondary-action" type="button" onClick={onCreatePlan} disabled={isLoading}>创建部署计划</button>
+          </div>
+        )}
       </div>
-
+      <div className="panel">
+        <div className="panel-header compact"><h2>部署计划确认</h2><ShieldAlert size={18} /></div>
+        {state.task ? (
+          <div className="result-box">
+            <strong>{state.task.plan.summary}</strong>
+            <span>风险：{state.task.plan.risk_level} · sudo：{state.task.plan.requires_sudo ? "需要" : "不需要"}</span>
+            <button className="secondary-action" type="button" onClick={onExecuteDeployment} disabled={isLoading}>确认执行部署</button>
+          </div>
+        ) : (
+          <ol className="step-list">
+            <li>上传服务包</li>
+            <li>分析项目类型</li>
+            <li>展示部署计划</li>
+            <li>确认后执行</li>
+          </ol>
+        )}
+      </div>
       <div className="panel resource-panel">
-        <div className="panel-header compact">
-          <h2>资源快照</h2>
-          <Cpu size={18} />
-        </div>
-        <Resource label="CPU" value="-" />
-        <Resource label="内存" value="-" />
-        <Resource label="磁盘" value="-" icon={<HardDrive size={16} />} />
+        <div className="panel-header compact"><h2>执行日志</h2><History size={18} /></div>
+        {state.task?.logs.map((log) => <pre className="output-box" key={log.id}>{log.command}\n{log.stdout}</pre>)}
+        {state.task && <span>状态：{state.task.status}</span>}
       </div>
     </section>
   );
 }
 
-function HistorySection() {
+function HistorySection({ deployments, packages }: { deployments: DeploymentTask[]; packages: PackageRecord[] }) {
   return (
     <section className="content-grid single">
       <div className="panel">
         <div className="panel-header compact">
-          <div>
-            <h2>历史记录</h2>
-            <p>部署任务、命令输出和审计日志列表会在下一阶段展示。</p>
-          </div>
+          <div><h2>历史记录</h2><p>展示部署任务、命令输出和服务包记录。</p></div>
           <History size={18} />
         </div>
         <div className="timeline">
-          <span>已完成：管理员初始化和登录</span>
-          <span>已完成：AI 中转站配置保存</span>
-          <span>已完成：服务器保存和连接检查入口</span>
+          {deployments.map((task) => (
+            <div className="list-card" key={task.id}>
+              <strong>部署任务 #{task.id} · {task.status}</strong>
+              {task.plan.steps.map((step) => <span key={`${task.id}-${step.command}`}>{step.command}</span>)}
+              {task.logs.map((log) => <span key={log.id}>{log.stdout || log.stderr}</span>)}
+            </div>
+          ))}
+          {packages.map((item) => <span key={item.id}>服务包：{item.filename}</span>)}
+          {deployments.length === 0 && packages.length === 0 && <span>暂无历史记录。</span>}
         </div>
       </div>
     </section>
@@ -727,54 +1219,58 @@ function SettingsSection({
   form,
   isLoading,
   providers,
+  modelsByProvider,
+  manualModelId,
   onChange,
+  onChangeManualModelId,
   onSave,
-  onTestProvider
+  onTestProvider,
+  onFetchModels,
+  onAddManualModel,
+  onSetDefaultModel
 }: {
   form: ProviderForm;
   isLoading: boolean;
   providers: AiProvider[];
+  modelsByProvider: Record<number, AiModel[]>;
+  manualModelId: string;
   onChange: (form: ProviderForm) => void;
+  onChangeManualModelId: (value: string) => void;
   onSave: () => void;
   onTestProvider: (provider: AiProvider) => void;
+  onFetchModels: (provider: AiProvider) => void;
+  onAddManualModel: (provider: AiProvider) => void;
+  onSetDefaultModel: (provider: AiProvider, model: AiModel) => void;
 }) {
   return (
     <section className="content-grid single">
       <div className="panel">
-        <div className="panel-header compact">
-          <h2>AI 中转站配置</h2>
-          <KeyRound size={18} />
-        </div>
+        <div className="panel-header compact"><h2>AI 中转站配置</h2><KeyRound size={18} /></div>
         <div className="form-grid">
-          <label>
-            供应商名称
-            <input value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} />
-          </label>
-          <label>
-            接口基础地址
-            <input value={form.base_url} onChange={(event) => onChange({ ...form, base_url: event.target.value })} />
-          </label>
-          <label>
-            API 密钥
-            <input type="password" value={form.api_key} onChange={(event) => onChange({ ...form, api_key: event.target.value })} />
-          </label>
-          <label>
-            默认模型
-            <input value={form.default_model} onChange={(event) => onChange({ ...form, default_model: event.target.value })} />
-          </label>
+          <label>供应商名称<input value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} /></label>
+          <label>接口基础地址<input value={form.base_url} onChange={(event) => onChange({ ...form, base_url: event.target.value })} /></label>
+          <label>API 密钥<input type="password" value={form.api_key} onChange={(event) => onChange({ ...form, api_key: event.target.value })} /></label>
+          <label>默认模型<input value={form.default_model} onChange={(event) => onChange({ ...form, default_model: event.target.value })} /></label>
         </div>
-        <button className="secondary-action" onClick={onSave} type="button" disabled={isLoading}>
-          保存 AI 中转站
-        </button>
+        <button className="secondary-action" onClick={onSave} type="button" disabled={isLoading}>保存 AI 中转站</button>
         <div className="provider-list">
           {providers.map((provider) => (
             <div className="list-card" key={provider.id}>
               <strong>{provider.name}</strong>
               <span>{provider.base_url}</span>
               <span>{provider.default_model ?? "未设置模型"} · {provider.api_key_mask}</span>
-              <button className="ghost-action" onClick={() => onTestProvider(provider)} type="button" disabled={isLoading}>
-                测试
-              </button>
+              <div className="button-row">
+                <button className="ghost-action" onClick={() => onTestProvider(provider)} type="button" disabled={isLoading}>测试 {provider.name}</button>
+                <button className="ghost-action" onClick={() => onFetchModels(provider)} type="button" disabled={isLoading}>拉取模型</button>
+              </div>
+              <label>手动模型 ID<input value={manualModelId} onChange={(event) => onChangeManualModelId(event.target.value)} /></label>
+              <button className="ghost-action" onClick={() => onAddManualModel(provider)} type="button" disabled={isLoading}>添加手动模型</button>
+              {(modelsByProvider[provider.id] ?? []).map((model) => (
+                <div className="model-row" key={model.id}>
+                  <span>{model.model_id} · {model.source === "fetched" ? "拉取" : "手动"} · {model.enabled ? "已启用" : "已禁用"}</span>
+                  <button className="ghost-action" onClick={() => onSetDefaultModel(provider, model)} type="button">设为默认模型 {model.model_id}</button>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -786,39 +1282,76 @@ function SettingsSection({
 function ServerTable({
   isLoading,
   servers,
-  onTestServer
+  onTestServer,
+  onSelectServer
 }: {
   isLoading: boolean;
   servers: ServerRecord[];
   onTestServer: (server: ServerRecord) => void;
+  onSelectServer: (server: ServerRecord) => void;
 }) {
   return (
     <div className="server-table">
       <div className="table-row table-head">
-        <span>名称</span>
-        <span>地址</span>
-        <span>用户</span>
-        <span>认证</span>
-        <span>模式</span>
-        <span>状态</span>
-        <span>操作</span>
+        <span>名称</span><span>地址</span><span>系统</span><span>CPU</span><span>内存</span><span>磁盘</span><span>状态</span><span>操作</span>
       </div>
       {servers.map((server) => (
         <div className="table-row" key={server.id}>
-          <strong>{server.name}</strong>
+          <button className="table-button" type="button" onClick={() => onSelectServer(server)}><strong>{server.name}</strong></button>
           <span>{server.host}:{server.port}</span>
-          <span>{server.username}</span>
-          <span>{server.has_private_key ? "私钥" : "密码"}</span>
-          <span>{formatConnectionMode(server.connection_mode)}</span>
+          <span>{server.latest_snapshot?.os_info ?? "-"}</span>
+          <span>CPU {formatPercent(server.latest_snapshot?.cpu_usage)}</span>
+          <span>内存 {formatPercent(server.latest_snapshot?.memory_usage)}</span>
+          <span>磁盘 {formatPercent(server.latest_snapshot?.disk_usage)}</span>
           <span className={`status ${server.status}`}>{formatServerStatus(server.status)}</span>
-          <button className="ghost-action compact-button" onClick={() => onTestServer(server)} type="button" disabled={isLoading}>
-            测试
-          </button>
+          <div className="button-row">
+            <button className="ghost-action compact-button" onClick={() => onTestServer(server)} type="button" disabled={isLoading}>测试</button>
+            <button className="ghost-action compact-button" onClick={() => onSelectServer(server)} type="button">查看 {server.name} 详情</button>
+          </div>
           {server.last_test_message && <small className="row-message">{server.last_test_message}</small>}
         </div>
       ))}
       {servers.length === 0 && <div className="empty-state">暂无服务器，请先添加。</div>}
     </div>
+  );
+}
+
+function ServerDetailPanel({
+  server,
+  isLoading,
+  onRefreshSnapshot,
+  onEditServer,
+  onDeleteServer
+}: {
+  server: ServerRecord;
+  isLoading: boolean;
+  onRefreshSnapshot: (server: ServerRecord) => void;
+  onEditServer: (server: ServerRecord) => void;
+  onDeleteServer: (server: ServerRecord) => void;
+}) {
+  const snapshot = server.latest_snapshot;
+  return (
+    <section className="content-grid single">
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>{server.name}</h2>
+            <p>{server.username}@{server.host}:{server.port} · {formatServerStatus(server.status)}</p>
+          </div>
+          <div className="button-row">
+            <button className="ghost-action" type="button" onClick={() => onRefreshSnapshot(server)} disabled={isLoading}>刷新快照</button>
+            <button className="ghost-action" type="button" onClick={() => onEditServer(server)}>编辑服务器</button>
+            <button className="ghost-action" type="button" onClick={() => onDeleteServer(server)} disabled={isLoading}>删除服务器</button>
+          </div>
+        </div>
+        <section className="metric-grid">
+          <Metric icon={<Cpu />} label="CPU" value={formatPercent(snapshot?.cpu_usage)} detail={`${snapshot?.cpu_cores ?? "-"} 核`} />
+          <Metric icon={<Activity />} label="内存" value={formatPercent(snapshot?.memory_usage)} detail={`${snapshot?.memory_used_mb ?? "-"} / ${snapshot?.memory_total_mb ?? "-"} MB`} />
+          <Metric icon={<HardDrive />} label="磁盘" value={formatPercent(snapshot?.disk_usage)} detail={`${snapshot?.disk_used_gb ?? "-"} / ${snapshot?.disk_total_gb ?? "-"} GB`} />
+          <Metric icon={<Server />} label="系统" value={snapshot?.os_info ?? "-"} detail={snapshot?.kernel ?? "-"} />
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -833,19 +1366,14 @@ function AiProviderPanel({
 }) {
   return (
     <div className="panel">
-      <div className="panel-header compact">
-        <h2>AI 中转站</h2>
-        <KeyRound size={18} />
-      </div>
+      <div className="panel-header compact"><h2>AI 中转站</h2><KeyRound size={18} /></div>
       <div className="provider-list compact-list">
         {providers.map((provider) => (
           <div className="list-card" key={provider.id}>
             <strong>{provider.name}</strong>
             <span>{provider.base_url}</span>
             <span>{provider.default_model ?? "未设置模型"}</span>
-            <button className="ghost-action" onClick={() => onTestProvider(provider)} type="button" disabled={isLoading}>
-              测试
-            </button>
+            <button className="ghost-action" onClick={() => onTestProvider(provider)} type="button" disabled={isLoading}>测试</button>
           </div>
         ))}
         {providers.length === 0 && <div className="empty-state">暂无 AI 中转站配置。</div>}
@@ -865,51 +1393,27 @@ function Metric({ icon, label, value, detail }: { icon: React.ReactNode; label: 
   );
 }
 
-function Resource({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
-  const numericValue = Number.parseInt(value, 10);
-  return (
-    <div className="resource">
-      <div>
-        {icon}
-        <span>{label}</span>
-      </div>
-      <strong>{value}</strong>
-      <meter value={Number.isFinite(numericValue) ? numericValue : 0} min="0" max="100" />
-    </div>
-  );
-}
-
-async function apiRequest<T>(
-  path: string,
-  options: { method?: string; token?: string; body?: unknown } = {}
-): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (options.token) {
-    headers.Authorization = `Bearer ${options.token}`;
-  }
+async function apiRequest<T>(path: string, options: { method?: string; token?: string; body?: unknown } = {}): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (!(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
   const response = await fetch(`/api${path}`, {
     method: options.method ?? "GET",
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: options.body === undefined ? undefined : options.body instanceof FormData ? options.body : JSON.stringify(options.body)
   });
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
+  if (!response.ok) throw new Error(await readErrorMessage(response));
   return (await response.json()) as T;
 }
 
 async function readErrorMessage(response: Response) {
   try {
     const body = (await response.json()) as { detail?: unknown };
-    if (typeof body.detail === "string") {
-      return body.detail;
-    }
+    if (typeof body.detail === "string") return body.detail;
     if (Array.isArray(body.detail) && body.detail.length > 0) {
       const first = body.detail[0] as { msg?: string; loc?: string[] };
       const field = Array.isArray(first.loc) ? first.loc[first.loc.length - 1] : "";
-      if (field === "password" && first.msg?.includes("8")) {
-        return "密码至少需要 8 位。";
-      }
+      if (field === "password" && first.msg?.includes("8")) return "密码至少需要 8 位。";
       return first.msg ?? `请求失败：后端返回 ${response.status}。`;
     }
   } catch {
@@ -927,14 +1431,12 @@ function formatServerStatus(status: string) {
 }
 
 function formatProviderStatus(status: string | null | undefined) {
-  if (!status) {
-    return "未检测";
-  }
-  return {
-    ok: "正常",
-    failed: "失败",
-    skipped: "未启用"
-  }[status] ?? "未知状态";
+  if (!status) return "未检测";
+  return { ok: "正常", failed: "失败", skipped: "未启用" }[status] ?? "未知状态";
+}
+
+function formatPercent(value: number | null | undefined) {
+  return typeof value === "number" ? `${Number.isInteger(value) ? value : value.toFixed(1)}%` : "-";
 }
 
 function formatConnectionMode(mode: string) {

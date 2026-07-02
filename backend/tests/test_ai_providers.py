@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy.orm import Session
 
 from app.core.crypto import CredentialCipher
@@ -151,3 +152,59 @@ def test_manages_ai_models(client: TestClient) -> None:
     assert list_response.json()[0]["enabled"] is False
     assert delete_response.status_code == 200
     assert client.get(f"/api/ai-providers/{provider['id']}/models", headers=headers).json() == []
+
+
+def test_tests_ai_provider_with_real_gateway_client(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = auth_headers(client)
+    provider = client.post(
+        "/api/ai-providers",
+        headers=headers,
+        json={
+            "name": "Relay",
+            "base_url": "https://relay.example/v1",
+            "api_key": "sk-test",
+            "default_model": "deepseek-chat",
+            "enabled": True,
+        },
+    ).json()
+
+    class FakeGateway:
+        def test_connection(self, **kwargs: object) -> tuple[bool, str]:
+            assert kwargs == {
+                "base_url": "https://relay.example/v1",
+                "api_key": "sk-test",
+                "model": "deepseek-chat",
+            }
+            return True, "AI 中转站连接成功。"
+
+    monkeypatch.setattr("app.api.routes.AiGatewayClient", FakeGateway)
+
+    response = client.post(f"/api/ai-providers/{provider['id']}/test", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["last_test_status"] == "ok"
+    assert body["last_test_message"] == "AI 中转站连接成功。"
+
+
+def test_fetches_ai_models_from_gateway(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = auth_headers(client)
+    provider = client.post(
+        "/api/ai-providers",
+        headers=headers,
+        json={"name": "Relay", "base_url": "https://relay.example/v1", "api_key": "sk-test", "enabled": True},
+    ).json()
+
+    class FakeGateway:
+        def fetch_models(self, **kwargs: object) -> list[str]:
+            assert kwargs == {"base_url": "https://relay.example/v1", "api_key": "sk-test"}
+            return ["deepseek-chat", "gpt-test"]
+
+    monkeypatch.setattr("app.api.routes.AiGatewayClient", FakeGateway)
+
+    response = client.post(f"/api/ai-providers/{provider['id']}/fetch-models", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [model["model_id"] for model in body] == ["deepseek-chat", "gpt-test"]
+    assert all(model["source"] == "fetched" for model in body)
