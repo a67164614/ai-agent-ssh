@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bot,
@@ -1071,6 +1071,13 @@ function TerminalSection({
   const [activeRailTab, setActiveRailTab] = useState<"servers" | "audit" | "commands">("servers");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+  const terminalInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [assistantProposal, setAssistantProposal] = useState<{
+    command: string;
+    explanation: string;
+    warnings: string[];
+    source: string;
+  } | null>(null);
   const activeServer = server ?? servers[0] ?? null;
   const prompt = activeServer ? `${activeServer.username}@${activeServer.name}:~#` : "未选择服务器:~#";
 
@@ -1096,6 +1103,7 @@ function TerminalSection({
       return;
     }
     setIsAiLoading(true);
+    setAssistantProposal(null);
     setLines((items) => [...items, `${prompt} //${question}`, "AI 正在分析，请稍候..."]);
     try {
       const proposal = await apiRequest<{
@@ -1113,12 +1121,15 @@ function TerminalSection({
           recent_output: lines.slice(-12).join("\n") || null
         }
       });
+      setAssistantProposal({
+        command: proposal.command,
+        explanation: proposal.explanation,
+        warnings: proposal.warnings,
+        source: proposal.source
+      });
       setLines((items) => [
         ...items.filter((line) => line !== "AI 正在分析，请稍候..."),
-        `AI 建议命令：${proposal.command}`,
-        `AI 说明：${proposal.explanation}`,
-        ...proposal.warnings.map((warning) => `AI 提醒：${warning}`),
-        "如需执行，请复制建议命令到终端并按 Enter。"
+        "AI 已生成命令建议，等待确认。"
       ]);
     } catch (error) {
       setLines((items) => [
@@ -1131,6 +1142,7 @@ function TerminalSection({
   }
 
   function submitDraft() {
+    if (isAiLoading) return;
     const command = draft.trimEnd();
     setDraft("");
     if (!command.trim()) return;
@@ -1148,7 +1160,6 @@ function TerminalSection({
   }
 
   function handleTerminalKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (isComposing) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
       if (draft) {
         event.preventDefault();
@@ -1156,7 +1167,8 @@ function TerminalSection({
       }
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+    if (isAiLoading) {
+      event.preventDefault();
       return;
     }
     if (event.ctrlKey && event.key.toLowerCase() === "l") {
@@ -1164,6 +1176,7 @@ function TerminalSection({
       setLines(["终端已清屏。"]);
       return;
     }
+    if (isComposing) return;
     if (event.key === "Enter") {
       event.preventDefault();
       submitDraft();
@@ -1185,17 +1198,65 @@ function TerminalSection({
     }
   }
 
+  function handleTerminalInput(event: React.ChangeEvent<HTMLTextAreaElement>) {
+    if (isAiLoading) {
+      event.currentTarget.value = draft;
+      return;
+    }
+    setDraft(event.currentTarget.value);
+  }
+
+  function handleTerminalInputKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    event.stopPropagation();
+    if (isAiLoading) {
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitDraft();
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      setDraft((value) => `${value}  `);
+    }
+  }
+
   function handleCompositionEnd(event: React.CompositionEvent<HTMLDivElement>) {
     setIsComposing(false);
+    if (isAiLoading) return;
     const value = event.data;
     if (value) setDraft((current) => `${current}${value}`);
   }
 
   function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    if (isAiLoading) {
+      event.preventDefault();
+      return;
+    }
     const text = event.clipboardData.getData("text/plain") || event.clipboardData.getData("text");
     if (!text) return;
     event.preventDefault();
     setDraft((value) => `${value}${text}`);
+  }
+
+  function applyAssistantCommand() {
+    if (!assistantProposal) return;
+    setDraft(assistantProposal.command);
+    requestAnimationFrame(() => terminalInputRef.current?.focus());
+  }
+
+  function executeAssistantCommand() {
+    if (!assistantProposal || isAiLoading) return;
+    setDraft("");
+    setLines((items) => [...items, `${prompt} ${assistantProposal.command}`]);
+    if (!socket) {
+      setLines((items) => [...items, "终端尚未连接，请先在右侧选择服务器并连接。"]);
+      return;
+    }
+    socket.send(`${assistantProposal.command}\n`);
+    setAssistantProposal(null);
   }
 
   return (
@@ -1217,10 +1278,12 @@ function TerminalSection({
         </div>
         <div
           className="terminal-screen"
-          role="textbox"
+          role="group"
           aria-label="终端窗口"
+          aria-busy={isAiLoading}
           tabIndex={0}
           onKeyDown={handleTerminalKeyDown}
+          onClick={() => terminalInputRef.current?.focus()}
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={handleCompositionEnd}
           onPaste={handlePaste}
@@ -1229,9 +1292,38 @@ function TerminalSection({
             {lines.map((line, index) => (
               <span key={`${line}-${index}`}>{line}</span>
             ))}
+            {assistantProposal && (
+              <div className="terminal-ai-card">
+                <strong>AI 助手</strong>
+                <span>已为你生成可执行的服务器命令</span>
+                <div className="terminal-command-card">
+                  <span>是否执行以下命令</span>
+                  <code>{assistantProposal.command}</code>
+                  <small>{assistantProposal.warnings.join("；") || "低风险"}</small>
+                  <div className="terminal-command-actions">
+                    <button type="button" onClick={executeAssistantCommand}>执行</button>
+                    <button type="button" onClick={applyAssistantCommand}>应用到命令行</button>
+                    <button type="button" onClick={() => setAssistantProposal(null)}>拒绝</button>
+                  </div>
+                </div>
+                <span>命令功能说明：</span>
+                <p>{assistantProposal.explanation}</p>
+              </div>
+            )}
             <span className="terminal-input-line">
               <strong>{prompt}</strong>
-              <span>{draft}</span>
+              <textarea
+                ref={terminalInputRef}
+                aria-label="终端输入"
+                value={draft}
+                disabled={isAiLoading}
+                rows={1}
+                spellCheck={false}
+                onChange={handleTerminalInput}
+                onKeyDown={handleTerminalInputKeyDown}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={() => setIsComposing(false)}
+              />
               <i aria-hidden="true" />
             </span>
           </div>

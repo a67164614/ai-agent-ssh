@@ -372,14 +372,14 @@ describe("App interactions", () => {
     expect(screen.getByRole("heading", { name: "SSH 工作台" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "服务器列表" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加服务器" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("终端输入")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "终端输入" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "连接 prod-app-01" }));
     await waitFor(() => {
       expect(screen.getByText("已连接到 prod-app-01。")).toBeInTheDocument();
     });
 
-    screen.getByRole("textbox", { name: "终端窗口" }).focus();
+    screen.getByRole("textbox", { name: "终端输入" }).focus();
     await userEvent.keyboard("pwd{Enter}");
 
     expect(instances[0].url).toContain("/api/servers/1/terminal");
@@ -407,7 +407,7 @@ describe("App interactions", () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
-    screen.getByRole("textbox", { name: "终端窗口" }).focus();
+    screen.getByRole("textbox", { name: "终端输入" }).focus();
     await userEvent.keyboard("//查看磁盘和内存{Enter}");
 
     await waitFor(() => {
@@ -416,8 +416,11 @@ describe("App interactions", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
-    expect(await screen.findByText("AI 建议命令：df -h && free -h")).toBeInTheDocument();
-    expect(screen.getByText("AI 说明：查看磁盘和内存使用情况。")).toBeInTheDocument();
+    expect(await screen.findByText("已为你生成可执行的服务器命令")).toBeInTheDocument();
+    expect(screen.getByText("df -h && free -h")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "应用到命令行" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "执行" })).toBeInTheDocument();
+    expect(screen.queryByText("如需执行，请复制建议命令到终端并按 Enter。")).not.toBeInTheDocument();
   });
 
   test("supports Chinese input, paste, copy and compact prompt in the terminal", async () => {
@@ -435,8 +438,13 @@ describe("App interactions", () => {
     await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
     expect(screen.queryByRole("status", { name: "" })).not.toBeInTheDocument();
 
-    const terminal = screen.getByRole("textbox", { name: "终端窗口" });
+    const terminal = screen.getByRole("group", { name: "终端窗口" });
     terminal.focus();
+    fireEvent.compositionStart(terminal);
+    fireEvent.compositionUpdate(terminal, { data: "中文输入" });
+    fireEvent.compositionEnd(terminal, { data: "中文输入" });
+    expect(screen.getByText("中文输入")).toBeInTheDocument();
+    await userEvent.keyboard("{Backspace}{Backspace}{Backspace}{Backspace}");
     fireEvent.compositionStart(terminal);
     fireEvent.compositionUpdate(terminal, { data: "//查看日志" });
     fireEvent.compositionEnd(terminal, { data: "//查看日志" });
@@ -452,6 +460,80 @@ describe("App interactions", () => {
 
     await userEvent.keyboard("{Control>}c{/Control}");
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("//查看日志 && tail -n 50 /var/log/syslog"));
+  });
+
+  test("keeps terminal input locked while AI is generating and can execute suggestion", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    let resolveProposal: ((value: unknown) => void) | null = null;
+    const instances: Array<{ sent: string[]; onopen: null | (() => void); send: (value: string) => void }> = [];
+    class MockWebSocket {
+      sent: string[] = [];
+      onopen: null | (() => void) = null;
+      onmessage: null | ((event: { data: string }) => void) = null;
+      onclose: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+
+      constructor() {
+        instances.push(this);
+        setTimeout(() => this.onopen?.(), 0);
+      }
+
+      send(value: string) {
+        this.sent.push(value);
+      }
+    }
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString();
+      if (path === "/api/servers/1/assistant/propose-command") {
+        return new Promise((resolve) => {
+          resolveProposal = resolve;
+        });
+      }
+      const route = {
+        "/api/auth/status": { body: { initialized: true } },
+        "/api/auth/me": { body: adminUser },
+        "/api/servers": { body: [serverRecord] },
+        "/api/ai-providers": { body: [] },
+        "/api/packages": { body: [] },
+        "/api/deployments": { body: [] }
+      }[path];
+      if (!route) throw new Error(`No mock response for ${path}`);
+      return { ok: true, status: 200, json: async () => route.body };
+    });
+
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
+    await userEvent.click(screen.getByRole("button", { name: "连接 prod-app-01" }));
+    await screen.findByText("已连接到 prod-app-01。");
+
+    const terminal = screen.getByRole("textbox", { name: "终端输入" });
+    terminal.focus();
+    await userEvent.keyboard("//查询当前服务器配置{Enter}");
+    await userEvent.keyboard("pwd{Enter}");
+
+    expect(await screen.findByText("AI 正在分析，请稍候...")).toBeInTheDocument();
+    expect(instances[0].sent).not.toContain("pwd\n");
+
+    expect(resolveProposal).toBeTypeOf("function");
+    const finishProposal = resolveProposal as unknown as (value: unknown) => void;
+    finishProposal({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        command: "uname -a && free -h",
+        explanation: "查看系统和内存信息。",
+        requires_confirmation: true,
+        warnings: ["只读查询命令。"],
+        source: "ai"
+      })
+    });
+
+    await screen.findByText("uname -a && free -h");
+    await userEvent.click(screen.getByRole("button", { name: "应用到命令行" }));
+    expect(screen.getByRole("textbox", { name: "终端输入" })).toHaveValue("uname -a && free -h");
+    await userEvent.click(screen.getByRole("button", { name: "执行" }));
+    expect(instances[0].sent).toContain("uname -a && free -h\n");
   });
 
   test("opens server detail and supports snapshot refresh, edit and delete", async () => {
