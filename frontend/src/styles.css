@@ -31,7 +31,8 @@ button:disabled {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+[role="textbox"]:focus-visible {
   outline: 3px solid rgba(23, 105, 224, 0.22);
   outline-offset: 2px;
 }
@@ -488,6 +489,259 @@ p {
   overflow: auto;
 }
 
+.terminal-workbench {
+  min-height: calc(100dvh - 156px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+}
+
+.terminal-stage {
+  min-width: 0;
+  min-height: 680px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #0f172a;
+  border-radius: 10px;
+  background: #05070b;
+  box-shadow: 0 22px 70px rgba(15, 23, 42, 0.20);
+}
+
+.terminal-topbar {
+  min-height: 70px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid #1f2937;
+  background: #111827;
+  color: #f8fafc;
+}
+
+.terminal-topbar h2 {
+  font-size: 20px;
+}
+
+.terminal-topbar span {
+  display: block;
+  margin-top: 5px;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.terminal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.terminal-actions .ghost-action {
+  min-height: 34px;
+  background: #1f2937;
+  color: #dbeafe;
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 8px 10px 0;
+  background: #d7dce3;
+}
+
+.terminal-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  padding: 0 16px;
+  background: #c3cad4;
+  color: #2f3b4c;
+  cursor: pointer;
+}
+
+.terminal-tabs button.active {
+  background: #05070b;
+  color: #f8fafc;
+}
+
+.terminal-screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 18px;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 85% 6%, rgba(34, 197, 94, 0.10), transparent 24%),
+    #05070b;
+  color: #d1fae5;
+  cursor: text;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.terminal-output {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-output > span {
+  min-height: 22px;
+}
+
+.terminal-input-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #f8fafc;
+}
+
+.terminal-input-line strong {
+  color: #86efac;
+  font-weight: 700;
+}
+
+.terminal-input-line i {
+  width: 8px;
+  height: 18px;
+  display: inline-block;
+  background: #d1fae5;
+  animation: terminal-cursor 1s steps(2, start) infinite;
+}
+
+.terminal-badge {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  border: 1px solid rgba(134, 239, 172, 0.32);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(5, 7, 11, 0.86);
+  color: #86efac;
+  font-size: 12px;
+}
+
+@keyframes terminal-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+
+.terminal-rail {
+  min-width: 0;
+  border: 1px solid #d8e2ee;
+  border-radius: 10px;
+  background: #ffffff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-rail-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid #e4ebf3;
+  background: #f5f8fc;
+}
+
+.terminal-rail-tabs button {
+  min-height: 48px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #5f7086;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.terminal-rail-tabs button.active {
+  border-bottom-color: #1769e0;
+  color: #1769e0;
+  background: #ffffff;
+}
+
+.terminal-rail-body {
+  padding: 16px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.add-server-action {
+  width: 100%;
+}
+
+.terminal-server-list {
+  display: grid;
+  gap: 12px;
+}
+
+.terminal-server-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.terminal-server-card.active {
+  border-color: #9fc1f5;
+  background: #f2f7ff;
+}
+
+.terminal-server-card strong,
+.terminal-server-card span,
+.terminal-server-card small {
+  display: block;
+}
+
+.terminal-server-card strong {
+  color: #17202a;
+}
+
+.terminal-server-card span {
+  margin-top: 5px;
+  color: #516174;
+  font-size: 13px;
+}
+
+.terminal-server-card small {
+  margin-top: 5px;
+  color: #7a899b;
+}
+
+.terminal-tip {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f7f9fc;
+  color: #526277;
+}
+
+.terminal-tip strong {
+  color: #17202a;
+}
+
+.command-palette button {
+  min-height: 38px;
+  border: 1px solid #d8e2ee;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #243448;
+  cursor: pointer;
+  text-align: left;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
 .resource-panel {
   display: grid;
   align-content: start;
@@ -546,6 +800,14 @@ meter {
   .content-grid.lower {
     grid-template-columns: 1fr 1fr;
   }
+
+  .terminal-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-stage {
+    min-height: 560px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -568,6 +830,27 @@ meter {
 
   .nav-list {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .terminal-workbench {
+    min-height: auto;
+  }
+
+  .terminal-topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .terminal-actions {
+    justify-content: stretch;
+  }
+
+  .terminal-actions .ghost-action {
+    flex: 1;
+  }
+
+  .terminal-rail-tabs {
+    grid-template-columns: 1fr;
   }
 
   h1 {

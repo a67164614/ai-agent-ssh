@@ -323,7 +323,7 @@ describe("App interactions", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/ai-providers", expect.objectContaining({ method: "POST" }));
   });
 
-  test("opens terminal page with connectable websocket UI", async () => {
+  test("runs commands from the terminal surface and shows the server rail", async () => {
     window.localStorage.setItem("ai-agent-ssh-token", "token-1");
     const instances: Array<{
       url: string;
@@ -369,15 +369,55 @@ describe("App interactions", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
 
-    expect(screen.getByRole("heading", { name: "网页 SSH 终端" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "连接终端" }));
+    expect(screen.getByRole("heading", { name: "SSH 工作台" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "服务器列表" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加服务器" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("终端输入")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "连接 prod-app-01" }));
     await waitFor(() => {
-      expect(screen.getByText("终端已连接。")).toBeInTheDocument();
+      expect(screen.getByText("已连接到 prod-app-01。")).toBeInTheDocument();
     });
-    await userEvent.type(screen.getByLabelText("终端输入"), "pwd");
-    await userEvent.click(screen.getByRole("button", { name: "发送命令" }));
+
+    screen.getByRole("textbox", { name: "终端窗口" }).focus();
+    await userEvent.keyboard("pwd{Enter}");
+
     expect(instances[0].url).toContain("/api/servers/1/terminal");
-    expect(instances[0].sent).toContain("pwd");
+    expect(instances[0].sent).toContain("pwd\n");
+    expect(screen.getByText("root@10.0.12.21:~# pwd")).toBeInTheDocument();
+  });
+
+  test("routes double-slash terminal input to the AI assistant", async () => {
+    window.localStorage.setItem("ai-agent-ssh-token", "token-1");
+    mockApi({
+      "/api/auth/status": { body: { initialized: true } },
+      "/api/auth/me": { body: adminUser },
+      "/api/servers": { body: [serverRecord] },
+      "/api/servers/1/assistant/propose-command": {
+        body: {
+          command: "df -h && free -h",
+          explanation: "查看磁盘和内存使用情况。",
+          requires_confirmation: true,
+          warnings: ["只读查询命令。"],
+          source: "ai"
+        }
+      }
+    });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /终端/ }));
+    screen.getByRole("textbox", { name: "终端窗口" }).focus();
+    await userEvent.keyboard("//查看磁盘和内存{Enter}");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/servers/1/assistant/propose-command",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+    expect(await screen.findByText("AI 建议命令：df -h && free -h")).toBeInTheDocument();
+    expect(screen.getByText("AI 说明：查看磁盘和内存使用情况。")).toBeInTheDocument();
   });
 
   test("opens server detail and supports snapshot refresh, edit and delete", async () => {

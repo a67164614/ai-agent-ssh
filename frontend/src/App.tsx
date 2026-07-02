@@ -833,7 +833,12 @@ export function App() {
             <h1>{currentTitle}</h1>
             <p>通过 SSH 管理多台服务器，AI 只生成计划，执行前必须确认。</p>
           </div>
-          <button className="primary-action" onClick={() => { setEditingServer(null); setServerForm(emptyServerForm); setShowServerForm(true); }} type="button">
+          <button
+            aria-label={activeSection === "terminal" ? "顶部添加服务器" : "添加服务器"}
+            className="primary-action"
+            onClick={() => { setEditingServer(null); setServerForm(emptyServerForm); setShowServerForm(true); }}
+            type="button"
+          >
             <Server size={18} />添加服务器
           </button>
         </header>
@@ -869,7 +874,20 @@ export function App() {
             onDeleteServer={deleteServer}
           />
         )}
-        {activeSection === "terminal" && <TerminalSection server={activeServer} token={token} />}
+        {activeSection === "terminal" && (
+          <TerminalSection
+            server={activeServer}
+            servers={servers}
+            token={token}
+            targetPath={deployState.targetPath}
+            onSelectServer={setSelectedServer}
+            onAddServer={() => {
+              setEditingServer(null);
+              setServerForm(emptyServerForm);
+              setShowServerForm(true);
+            }}
+          />
+        )}
         {activeSection === "assistant" && (
           <AssistantSection
             state={assistantState}
@@ -1020,51 +1038,214 @@ function ServerFormPanel({
   );
 }
 
-function TerminalSection({ server, token }: { server: ServerRecord | null; token: string }) {
+function TerminalSection({
+  server,
+  servers,
+  token,
+  targetPath,
+  onSelectServer,
+  onAddServer
+}: {
+  server: ServerRecord | null;
+  servers: ServerRecord[];
+  token: string;
+  targetPath: string;
+  onSelectServer: (server: ServerRecord) => void;
+  onAddServer: () => void;
+}) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
-  const [input, setInput] = useState("");
-  const [lines, setLines] = useState<string[]>(["请选择服务器并连接终端。"]);
+  const [draft, setDraft] = useState("");
+  const [lines, setLines] = useState<string[]>([
+    "欢迎进入 SSH 工作台。",
+    "在终端直接输入命令并按 Enter 执行，输入 //问题 可让 AI 生成建议命令。"
+  ]);
+  const [activeRailTab, setActiveRailTab] = useState<"servers" | "audit" | "commands">("servers");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const activeServer = server ?? servers[0] ?? null;
+  const promptHost = activeServer?.latest_snapshot?.ip_addresses?.split(",")[0]?.trim() || activeServer?.host;
+  const prompt = activeServer ? `${activeServer.username}@${promptHost}:~#` : "未选择服务器:~#";
 
-  function connect() {
-    if (!server) {
+  function connect(targetServer = activeServer) {
+    if (!targetServer) {
       setLines((items) => [...items, "没有可连接的服务器。"]);
       return;
     }
+    onSelectServer(targetServer);
+    socket?.close();
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/servers/${server.id}/terminal?token=${encodeURIComponent(token)}`);
-    ws.onopen = () => setLines((items) => [...items, "终端已连接。"]);
+    const ws = new WebSocket(`${protocol}://${window.location.host}/api/servers/${targetServer.id}/terminal?token=${encodeURIComponent(token)}`);
+    ws.onopen = () => setLines((items) => [...items, `已连接到 ${targetServer.name}。`]);
     ws.onmessage = (event) => setLines((items) => [...items, String(event.data)]);
     ws.onerror = () => setLines((items) => [...items, "终端连接失败。"]);
     ws.onclose = () => setLines((items) => [...items, "终端已断开。"]);
     setSocket(ws);
   }
 
-  function send() {
-    if (!socket || !input.trim()) return;
-    socket.send(input);
-    setInput("");
+  async function askAssistant(question: string) {
+    if (!activeServer) {
+      setLines((items) => [...items, "请先选择服务器，再使用 AI 助手。"]);
+      return;
+    }
+    setIsAiLoading(true);
+    setLines((items) => [...items, `${prompt} //${question}`, "AI 正在分析，请稍候..."]);
+    try {
+      const proposal = await apiRequest<{
+        command: string;
+        explanation: string;
+        requires_confirmation: boolean;
+        warnings: string[];
+        source: string;
+      }>(`/servers/${activeServer.id}/assistant/propose-command`, {
+        method: "POST",
+        token,
+        body: {
+          question,
+          current_directory: targetPath,
+          recent_output: lines.slice(-12).join("\n") || null
+        }
+      });
+      setLines((items) => [
+        ...items.filter((line) => line !== "AI 正在分析，请稍候..."),
+        `AI 建议命令：${proposal.command}`,
+        `AI 说明：${proposal.explanation}`,
+        ...proposal.warnings.map((warning) => `AI 提醒：${warning}`),
+        "如需执行，请复制建议命令到终端并按 Enter。"
+      ]);
+    } catch (error) {
+      setLines((items) => [
+        ...items.filter((line) => line !== "AI 正在分析，请稍候..."),
+        `AI 助手调用失败：${formatError(error)}`
+      ]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  }
+
+  function submitDraft() {
+    const command = draft.trimEnd();
+    setDraft("");
+    if (!command.trim()) return;
+    if (command.trim().startsWith("//")) {
+      const question = command.trim().replace(/^\/\/\s*/, "");
+      void askAssistant(question || "请根据最近输出给出下一步建议");
+      return;
+    }
+    setLines((items) => [...items, `${prompt} ${command}`]);
+    if (!socket) {
+      setLines((items) => [...items, "终端尚未连接，请先在右侧选择服务器并连接。"]);
+      return;
+    }
+    socket.send(`${command}\n`);
+  }
+
+  function handleTerminalKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.ctrlKey && event.key.toLowerCase() === "l") {
+      event.preventDefault();
+      setLines(["终端已清屏。"]);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitDraft();
+      return;
+    }
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      setDraft((value) => value.slice(0, -1));
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      setDraft((value) => `${value}  `);
+      return;
+    }
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      setDraft((value) => `${value}${event.key}`);
+    }
   }
 
   return (
-    <section className="content-grid single">
-      <div className="panel terminal-panel">
-        <div className="panel-header compact">
+    <section className="terminal-workbench" aria-label="SSH 工作台">
+      <div className="terminal-stage">
+        <div className="terminal-topbar">
           <div>
-            <h2>网页 SSH 终端</h2>
-            <p>{server ? `当前服务器：${server.name}` : "请先添加服务器。"}</p>
+            <h2>SSH 工作台</h2>
+            <span>{activeServer ? `${activeServer.name} · ${activeServer.host}:${activeServer.port}` : "还没有选择服务器"}</span>
           </div>
-          <TerminalSquare size={18} />
+          <div className="terminal-actions">
+            <button className="ghost-action" type="button" onClick={() => connect(activeServer ?? undefined)} disabled={!activeServer}>连接终端</button>
+            <button className="ghost-action" type="button" onClick={() => socket?.close()} disabled={!socket}>断开连接</button>
+          </div>
         </div>
-        <div className="button-row">
-          <button className="primary-action" type="button" onClick={connect}>连接终端</button>
-          <button className="ghost-action" type="button" onClick={() => socket?.close()}>断开连接</button>
+        <div className="terminal-tabs">
+          <button className="active" type="button">本地终端</button>
+          <button type="button" onClick={() => setLines((items) => [...items, "新终端会话请先选择服务器连接。"])}>+</button>
         </div>
-        <div className="terminal">{lines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>)}</div>
-        <div className="form-grid one-line">
-          <label>终端输入<input value={input} onChange={(event) => setInput(event.target.value)} /></label>
-          <button className="secondary-action" type="button" onClick={send}>发送命令</button>
+        <div
+          className="terminal-screen"
+          role="textbox"
+          aria-label="终端窗口"
+          tabIndex={0}
+          onKeyDown={handleTerminalKeyDown}
+        >
+          <div className="terminal-output">
+            {lines.map((line, index) => (
+              <span key={`${line}-${index}`}>{line}</span>
+            ))}
+            <span className="terminal-input-line">
+              <strong>{prompt}</strong>
+              <span>{draft}</span>
+              <i aria-hidden="true" />
+            </span>
+          </div>
+          {isAiLoading && <div className="terminal-badge">AI 助手处理中</div>}
         </div>
       </div>
+      <aside className="terminal-rail">
+        <div className="terminal-rail-tabs" role="tablist" aria-label="终端侧栏">
+          <button className={activeRailTab === "servers" ? "active" : ""} role="tab" type="button" onClick={() => setActiveRailTab("servers")}>服务器列表</button>
+          <button className={activeRailTab === "audit" ? "active" : ""} role="tab" type="button" onClick={() => setActiveRailTab("audit")}>录像审计</button>
+          <button className={activeRailTab === "commands" ? "active" : ""} role="tab" type="button" onClick={() => setActiveRailTab("commands")}>常用命令</button>
+        </div>
+        {activeRailTab === "servers" && (
+          <div className="terminal-rail-body">
+            <button className="primary-action add-server-action" type="button" onClick={onAddServer}>
+              <Server size={17} />添加服务器
+            </button>
+            <div className="terminal-server-list">
+              {servers.map((item) => (
+                <div className={activeServer?.id === item.id ? "terminal-server-card active" : "terminal-server-card"} key={item.id}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{item.username}@{item.host}:{item.port}</span>
+                    <small>{formatServerStatus(item.status)} · {item.remark || "无备注"}</small>
+                  </div>
+                  <button className="secondary-action" type="button" onClick={() => connect(item)}>
+                    连接 {item.name}
+                  </button>
+                </div>
+              ))}
+              {servers.length === 0 && <div className="empty-state">暂无服务器，请先添加服务器。</div>}
+            </div>
+          </div>
+        )}
+        {activeRailTab === "audit" && (
+          <div className="terminal-rail-body">
+            <div className="terminal-tip">
+              <strong>录像审计</strong>
+              <span>当前终端输出会保留在本页面，后续可接入后端审计录像接口。</span>
+            </div>
+          </div>
+        )}
+        {activeRailTab === "commands" && (
+          <div className="terminal-rail-body command-palette">
+            {["pwd", "df -h", "free -h", "docker ps", "systemctl status nginx"].map((command) => (
+              <button type="button" key={command} onClick={() => setDraft(command)}>{command}</button>
+            ))}
+          </div>
+        )}
+      </aside>
     </section>
   );
 }
